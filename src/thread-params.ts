@@ -13,7 +13,6 @@ export type ThreadParams = {
 };
 
 export function validateThreadParams(input: ThreadInput): ThreadParams {
-  // TS 类型不能代替运行时检查，JS 调用者仍可能传入错误数据。
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error("参数必须是对象");
   }

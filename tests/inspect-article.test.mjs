@@ -59,10 +59,10 @@ test("没有 charset 时按已观察到的站点 GBK 处理", async () => {
   assert.equal(result.result, "AUTH_REQUIRED");
 });
 
-test("未知或空页面不猜测读帖成功", async () => {
+test("非登录提示页面（含空页面）标记为尚未解析", async () => {
   for (const body of ["<html>Other page</html>", "", null]) {
     const result = await inspectArticle(input, async () => htmlResponse(body));
-    assert.equal(result.result, "UNRECOGNIZED_PAGE");
+    assert.equal(result.result, "UNPARSED_PAGE");
   }
 });
 
@@ -100,7 +100,7 @@ test("响应分块合计超过 2 MiB 时取消读取", async () => {
 
 test("响应大小恰好等于上限仍可检查", async () => {
   const result = await inspectArticle(input, async () => htmlResponse(new Uint8Array(2 * 1024 * 1024)));
-  assert.equal(result.result, "UNRECOGNIZED_PAGE");
+  assert.equal(result.result, "UNPARSED_PAGE");
 });
 
 test("网络或重定向错误不重试、不回显原始错误", async () => {

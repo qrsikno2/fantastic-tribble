@@ -63,7 +63,7 @@ board + article_id + page
 | Cookie 配置 | 已完成 | 统一读取 `process.env.BYR_COOKIE` |
 | 中文解码 | 已完成 | 根据响应声明处理 GBK、UTF-8 等编码 |
 | 登录态实测 | 待验证 | 尚未使用真实 Cookie 验证服务器登录态 |
-| 正文与回复解析 | 规划中 | 当前只区分登录提示、HTTP 错误和未知页面 |
+| 正文与回复解析 | 规划中 | 当前只区分登录提示、HTTP 错误和未解析页面 |
 | 分页 | 规划中 | 当前请求函数只接受 `page = 1` |
 | MCP 工具注册 | 规划中 | 尚未提供 stdio MCP 入口 |
 | Hermes 集成 | 规划中 | 尚未形成可用的 Hermes MCP 配置 |
@@ -199,7 +199,7 @@ process.env.BYR_COOKIE
 | `RESPONSE_TOO_LARGE` | 响应正文超过 2 MiB |
 | `DECODE_ERROR` | 响应字符编码无法可靠解码 |
 | `REQUEST_FAILED` | 网络、流读取或重定向等未分类失败 |
-| `UNRECOGNIZED_PAGE` | 响应成功但页面语义尚无法识别 |
+| `UNPARSED_PAGE` | HTTP 请求成功，页面内容尚未解析 |
 
 Cookie 语法通过校验并不等于登录态有效；只有真实授权请求成功并完成页面解析后，才能确认读帖链路可用。
 

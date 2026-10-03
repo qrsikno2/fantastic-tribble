@@ -8,7 +8,7 @@ export type ArticleInspection = {
   http_status: number;
   content_type: string;
   content: string;
-  result: "AUTH_REQUIRED" | "UNRECOGNIZED_PAGE" | "HTTP_ERROR";
+  result: "AUTH_REQUIRED" | "UNPARSED_PAGE" | "HTTP_ERROR";
 };
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -91,13 +91,13 @@ export async function inspectArticle(
     }
 
     const html = await readHtml(response);
-    // 仅识别目前已观察到的登录提示；其他页面不宣称读取成功。
+    // 仅识别目前已观察到的登录提示；其他页面尚未解析帖子内容。
     const loginRequired = html.includes("您未登录,请登录后继续操作");
     return {
       article_url: articleUrl,
       http_status: response.status,
       content_type: contentType,
-      result: loginRequired ? "AUTH_REQUIRED" : "UNRECOGNIZED_PAGE",
+      result: loginRequired ? "AUTH_REQUIRED" : "UNPARSED_PAGE",
       content: html,
     };
   } catch (error) {
