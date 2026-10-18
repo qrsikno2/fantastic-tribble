@@ -76,15 +76,18 @@
 
 ### 环境要求
 
-当前开发环境：
+- Node.js 22.12.0 或更新版本
+- npm（包含 `npx`）
 
-- Node.js 26
-- npm 12
+当前开发与测试环境为 Node.js 26、npm 12。
 
-安装锁定依赖：
+### 从源码运行
+
+在项目目录安装锁定依赖并编译：
 
 ```sh
 npm ci --ignore-scripts
+npm run build
 ```
 
 类型检查、编译和测试：
@@ -101,7 +104,17 @@ npm test
 npm start
 ```
 
-服务等待标准输入中的 MCP 消息，在工具被调用时请求论坛。stdout 用于 MCP 协议，不输出启动提示或 Cookie。MCP 客户端应直接启动 Node.js（见下方配置），避免包管理器的运行提示混入协议输出。
+服务等待标准输入中的 MCP 消息，在工具被调用时请求论坛。stdout 用于 MCP 协议，不输出启动提示或 Cookie。MCP 客户端使用下方的直接 Node.js 或 `npx` 配置；不要将会打印脚本提示的 `npm start` 配置为 MCP 命令。
+
+### npm 包发布后的运行方式
+
+仓库已配置命令行入口与打包流程，**目前尚未发布到 npm**。发布后，无须克隆仓库或安装 TypeScript，即可运行：
+
+```sh
+npx -y fantastic-tribble
+```
+
+`npx` 会下载包及运行依赖，并启动已经编译好的服务；首次使用需要访问 npm。此命令启动的是 stdio MCP 服务，等待输入时没有界面或启动提示。读论坛仍需通过进程环境变量配置 `BYR_COOKIE`，详见下方客户端示例。`npx` 启动时不会自动读取当前目录的 `.env`。
 
 ## 版面查询工具
 
@@ -243,7 +256,21 @@ BYR_COOKIE="name=value; other=value"
 
 ### Hermes
 
-在 Hermes 或其他支持 stdio 的 MCP 客户端中配置进程与环境变量，例如（替换为实际项目绝对路径）：
+包发布到 npm 后，在 Hermes 或其他支持 stdio 的 MCP 客户端中可以使用：
+
+```json
+{
+  "mcpServers": {
+    "forumcp": {
+      "command": "npx",
+      "args": ["-y", "fantastic-tribble"],
+      "env": {"BYR_COOKIE": "name=value; other=value"}
+    }
+  }
+}
+```
+
+当前从源码运行时，先执行 `npm ci --ignore-scripts` 和 `npm run build`，再使用下面的配置，替换为实际项目绝对路径：
 
 ```json
 {
@@ -257,13 +284,13 @@ BYR_COOKIE="name=value; other=value"
 }
 ```
 
-具体配置入口以所用客户端为准。先执行 `npm run build`，再启动客户端。程序侧统一读取：
+具体配置入口以所用客户端为准。程序侧统一读取：
 
 ```ts
 process.env.BYR_COOKIE
 ```
 
-因此本地 `.env` 和 Hermes 环境变量共用同一套认证代码。Hermes 不需要、也不应该在每次工具调用时提交 Cookie。
+本地 `npm start` 加载 `.env`，客户端通过 `env` 注入 Cookie；两者共用同一套认证代码。直接 Node.js 和 `npx` 启动都只读取进程环境变量，不自动加载 `.env`。Hermes 不需要、也不应该在每次工具调用时提交 Cookie。
 
 ## 项目结构
 
@@ -361,10 +388,23 @@ Cookie 语法通过校验并不等于登录态有效；只有真实授权请求�
 
 ```sh
 npm run check   # 仅进行 TypeScript 类型检查
-npm run build   # 将 src/*.ts 编译到 dist/
+npm run build   # 清理旧 dist/，再将 src/*.ts 编译到 dist/
 npm test        # 编译并自动发现、运行全部测试
 npm start       # 启动 stdio MCP 服务
 ```
+
+### 本地打包验证
+
+在源码目录安装开发依赖后执行：
+
+```sh
+npm pack --pack-destination /tmp
+npx -y --package /tmp/fantastic-tribble-0.1.0.tgz fantastic-tribble
+```
+
+`npm pack` 会先清理并重新编译 `dist/`，然后生成本地安装包；它不会发布到 npm。第二条命令运行本地包，仍需通过环境变量配置 Cookie。包版本变化后，应相应更新文件名。打包内容限定为 `dist/` 及 npm 自动包含的包元数据、README 等文件，不包含源码测试、开发依赖、`.env` 或 Cookie 文件。
+
+只有完成 npm 发布后，其他机器才能直接使用上面的包名启动命令。
 
 自动测试覆盖参数校验、认证配置、HTTP 传输、版面目录合并、帖子结构解析、原始网页接口、MCP 工具注册和错误处理，使用假 Cookie、虚构帖子页面和临时 `.env`。帖子用例包括正文与热门回复分离、楼层编号、可缺失元数据、分页和未知结构拒绝。MCP 测试通过内存传输验证工具发现、结构化帖子调用、目录调用和错误返回；涉及 HTTP 传输的集成测试仅访问本机回环服务。测试不读取项目中的真实 `.env`，也不访问北邮人论坛。版面页数和帖子列表的成功解析另有授权登录后的实测验证。
 
