@@ -61,19 +61,19 @@ function runWithFakeEnvironment(t, fileContent, env, expected) {
   assert.equal(result.status, 0);
   assert.equal(result.stdout.trim(), "OK");
   assert.equal(result.stderr.includes("from-file"), false);
-  assert.equal(result.stderr.includes("from-hermes"), false);
+  assert.equal(result.stderr.includes("from-client"), false);
 }
 
 test("本地 .env 可以供统一读取函数使用", (t) => {
   runWithFakeEnvironment(t, 'BYR_COOKIE="session=from-file; preference=a#b"\n', {}, "session=from-file; preference=a#b");
 });
 
-test("Hermes 注入的环境变量优先于本地 .env", (t) => {
-  runWithFakeEnvironment(t, 'BYR_COOKIE="session=from-file"\n', { BYR_COOKIE: "session=from-hermes" }, "session=from-hermes");
+test("MCP 客户端注入的环境变量优先于本地 .env", (t) => {
+  runWithFakeEnvironment(t, 'BYR_COOKIE="session=from-file"\n', { BYR_COOKIE: "session=from-client" }, "session=from-client");
 });
 
 test("只有环境变量、没有 .env 时也可运行", (t) => {
-  runWithFakeEnvironment(t, null, { BYR_COOKIE: "session=from-hermes" }, "session=from-hermes");
+  runWithFakeEnvironment(t, null, { BYR_COOKIE: "session=from-client" }, "session=from-client");
 });
 
 test("显式注入空值时不回退使用文件里的旧凭据", (t) => {

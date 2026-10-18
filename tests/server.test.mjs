@@ -203,7 +203,7 @@ test("missing authentication is a controlled MCP tool error without fetching", a
     return htmlResponse("");
   }, {});
   for (const name of ["get_board_threads", "list_boards", "get_thread", "get_raw_website"]) {
-    const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "6454538" } });
+    const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "100001" } });
     assert.equal(result.isError, true);
     assert.deepEqual(payload(result), { result: "AUTH_REQUIRED" });
   }
@@ -255,7 +255,7 @@ test("malformed directory JSON is an MCP error with no partial data or response-
 test("network failures do not expose exception details or Cookie values", async (t) => {
   const client = await connect(t, async () => { throw new Error(`private request: ${fakeEnv.BYR_COOKIE}`); });
   for (const name of ["get_board_threads", "list_boards", "get_thread", "get_raw_website"]) {
-    const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "6454538" } });
+    const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "100001" } });
     assert.equal(result.isError, true);
     assert.deepEqual(payload(result), { result: "REQUEST_FAILED" });
     assert.equal(JSON.stringify(result).includes(fakeEnv.BYR_COOKIE), false);
@@ -271,7 +271,7 @@ test("forum rate limiting is a controlled MCP error, not an encoding failure", a
   ]) {
     const client = await connect(t, request);
     for (const name of ["get_board_threads", "list_boards", "get_thread", "get_raw_website"]) {
-      const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "6454538", page: 2 } });
+      const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "100001", page: 2 } });
       assert.equal(result.isError, true);
       assert.deepEqual(payload(result), { result: "RATE_LIMITED" });
     }
@@ -283,16 +283,16 @@ test("get_raw_website preserves raw HTML and requests the selected article page"
   let calls = 0;
   const client = await connect(t, async (url) => {
     calls += 1;
-    assert.equal(url, "https://bbs.byr.cn/article/Talking/6454538?p=3");
+    assert.equal(url, "https://bbs.byr.cn/article/Talking/100001?p=3");
     return htmlResponse(html);
   });
-  const result = await client.callTool({ name: "get_raw_website", arguments: { board: "Talking", article_id: "6454538", page: 3 } });
+  const result = await client.callTool({ name: "get_raw_website", arguments: { board: "Talking", article_id: "100001", page: 3 } });
   assert.notEqual(result.isError, true);
   assert.deepEqual(payload(result), {
     board: "Talking",
-    article_id: "6454538",
+    article_id: "100001",
     page: 3,
-    article_url: "https://bbs.byr.cn/article/Talking/6454538?p=3",
+    article_url: "https://bbs.byr.cn/article/Talking/100001?p=3",
     http_status: 200,
     content_type: "text/html; charset=utf-8",
     result: "OK",
@@ -307,7 +307,7 @@ test("article tools reject malformed arguments before HTTP requests", async (t) 
     calls += 1;
     return htmlResponse("");
   });
-  const base = { board: "Talking", article_id: "6454538" };
+  const base = { board: "Talking", article_id: "100001" };
   for (const name of ["get_thread", "get_raw_website"]) {
     for (const invalid of [
       { board: "../Talking" }, { board: "https://example.com" }, { board: "Talking\n" },
@@ -319,7 +319,7 @@ test("article tools reject malformed arguments before HTTP requests", async (t) 
       const result = await client.callTool({ name, arguments: { ...base, ...invalid } });
       assert.equal(result.isError, true, `${name}: ${JSON.stringify(invalid)}`);
     }
-    for (const args of [{}, { url: "https://example.com" }, { board: "Talking" }, { article_id: "6454538" }]) {
+    for (const args of [{}, { url: "https://example.com" }, { board: "Talking" }, { article_id: "100001" }]) {
       const result = await client.callTool({ name, arguments: args });
       assert.equal(result.isError, true, `${name}: ${JSON.stringify(args)}`);
     }
@@ -334,7 +334,7 @@ test("get_thread reports unreadable pages without exposing raw HTML", async (t) 
     ["<html><body>private server failure</body></html>", 503, "HTTP_ERROR"],
   ]) {
     const client = await connect(t, async () => htmlResponse(html, status));
-    const result = await client.callTool({ name: "get_thread", arguments: { board: "Talking", article_id: "6454538" } });
+    const result = await client.callTool({ name: "get_thread", arguments: { board: "Talking", article_id: "100001" } });
     const data = payload(result);
     assert.equal(result.isError, true);
     assert.equal(data.result, expected);
@@ -348,18 +348,18 @@ test("get_thread returns topic, owner, hot replies, and requested-page floors wi
   for (const page of [1, 2]) {
     let calls = 0;
     const html = threadPage({ page });
-    const articleUrl = `https://bbs.byr.cn/article/Talking/6454538${page === 1 ? "" : `?p=${page}`}`;
+    const articleUrl = `https://bbs.byr.cn/article/Talking/100001${page === 1 ? "" : `?p=${page}`}`;
     const client = await connect(t, async (url) => {
       calls += 1;
       assert.equal(url, articleUrl);
       return htmlResponse(html);
     });
-    const result = await client.callTool({ name: "get_thread", arguments: { board: "Talking", article_id: "6454538", page } });
+    const result = await client.callTool({ name: "get_thread", arguments: { board: "Talking", article_id: "100001", page } });
     const data = payload(result);
     assert.notEqual(result.isError, true);
     assert.equal(data.result, "OK");
     assert.equal(data.board, "Talking");
-    assert.equal(data.article_id, "6454538");
+    assert.equal(data.article_id, "100001");
     assert.equal(data.article_url, articleUrl);
     assert.equal(data.page, page);
     assert.equal(data.total_pages, 2);
@@ -385,13 +385,13 @@ test("get_raw_website reports HTTP and authentication failures as MCP errors", a
     ["private server failure", 503, "HTTP_ERROR", ""],
   ]) {
     const client = await connect(t, async () => htmlResponse(html, status));
-    const result = await client.callTool({ name: "get_raw_website", arguments: { board: "Talking", article_id: "6454538" } });
+    const result = await client.callTool({ name: "get_raw_website", arguments: { board: "Talking", article_id: "100001" } });
     const data = payload(result);
     assert.equal(result.isError, true);
     assert.equal(data.result, expected);
     assert.equal(data.http_status, status);
     assert.equal(data.page, 1);
-    assert.equal(data.article_url, "https://bbs.byr.cn/article/Talking/6454538");
+    assert.equal(data.article_url, "https://bbs.byr.cn/article/Talking/100001");
     assert.equal(data.content, content);
   }
 });

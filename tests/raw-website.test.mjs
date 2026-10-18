@@ -3,7 +3,7 @@ import test from "node:test";
 import { inspectRawWebsite } from "../dist/raw-website.js";
 
 const fakeEnv = { BYR_COOKIE: "session=fake-test-cookie" };
-const input = { board: "Talking", article_id: "6454538" };
+const input = { board: "Talking", article_id: "100001" };
 
 function htmlResponse(html, status = 200) {
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } });
@@ -14,7 +14,7 @@ test("raw website returns decoded HTML unchanged, including unrecognized and emp
     let calls = 0;
     const result = await inspectRawWebsite(input, async (url, options) => {
       calls += 1;
-      assert.equal(url, "https://bbs.byr.cn/article/Talking/6454538");
+      assert.equal(url, "https://bbs.byr.cn/article/Talking/100001");
       assert.equal(new Headers(options.headers).get("Cookie"), fakeEnv.BYR_COOKIE);
       assert.equal(options.redirect, "error");
       return htmlResponse(html);
@@ -22,7 +22,7 @@ test("raw website returns decoded HTML unchanged, including unrecognized and emp
     assert.deepEqual(result, {
       ...input,
       page: 1,
-      article_url: "https://bbs.byr.cn/article/Talking/6454538",
+      article_url: "https://bbs.byr.cn/article/Talking/100001",
       http_status: 200,
       content_type: "text/html; charset=utf-8",
       content: html,
@@ -36,11 +36,11 @@ test("raw website supports a single requested page without following pagination"
   let calls = 0;
   const result = await inspectRawWebsite({ ...input, page: 4 }, async (url) => {
     calls += 1;
-    assert.equal(url, "https://bbs.byr.cn/article/Talking/6454538?p=4");
+    assert.equal(url, "https://bbs.byr.cn/article/Talking/100001?p=4");
     return htmlResponse('<a href="?p=5">下一页</a>');
   }, fakeEnv);
   assert.equal(result.page, 4);
-  assert.equal(result.article_url, "https://bbs.byr.cn/article/Talking/6454538?p=4");
+  assert.equal(result.article_url, "https://bbs.byr.cn/article/Talking/100001?p=4");
   assert.equal(result.result, "OK");
   assert.equal(calls, 1);
 });
@@ -71,7 +71,7 @@ test("raw website validates target and authentication before fetching", async ()
   const request = async () => { calls += 1; return htmlResponse(""); };
   for (const params of [
     { ...input, board: "https://example.com" },
-    { ...input, article_id: "../6454538" },
+    { ...input, article_id: "../100001" },
     { ...input, article_id: "01" },
     { ...input, page: 0 },
     { ...input, page: Number.MAX_SAFE_INTEGER + 1 },

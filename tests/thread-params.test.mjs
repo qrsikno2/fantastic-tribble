@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { validateThreadParams } from "../dist/thread-params.js";
 
-const valid = { board: "Talking", article_id: "6454538", page: 2 };
+const valid = { board: "Talking", article_id: "100001", page: 2 };
 
 test("保留合法参数，返回新对象", () => {
   const input = Object.freeze({ ...valid });
@@ -12,7 +12,7 @@ test("保留合法参数，返回新对象", () => {
 });
 
 test("省略 page 或传 undefined 时默认为 1", () => {
-  const input = Object.freeze({ board: "Talking", article_id: "6454538" });
+  const input = Object.freeze({ board: "Talking", article_id: "100001" });
   assert.deepEqual(validateThreadParams(input), { ...input, page: 1 });
   assert.equal(validateThreadParams({ ...input, page: undefined }).page, 1);
   assert.equal(Object.hasOwn(input, "page"), false);
@@ -37,7 +37,7 @@ const invalidFields = {
   board: [undefined, null, 123, "", " ", " Talking", "Talking ", ".", "..",
     "../Talking", "Talking/Other", "Talking\\Other", "Talking?x=1", "Talking#x",
     "%2e%2e", "Talking\n", "谈天说地"],
-  article_id: [undefined, null, 6454538, "", "0", "-1", "01", "1.5", "1e3",
+  article_id: [undefined, null, 100001, "", "0", "-1", "01", "1.5", "1e3",
     " 123", "123\n", "1/2"],
   page: [null, "1", true, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1],
 };

@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseThreadPage } from "../dist/parse-thread.js";
 import { anonymousThreadHtml, threadHtml, threadPage } from "./fixtures/thread-page.mjs";
 
-const parse = (html) => parseThreadPage(html, "Talking", "6454538");
+const parse = (html) => parseThreadPage(html, "Talking", "100001");
 
 test("帖子按主题、楼主、热门回复和当前页楼层分别返回", () => {
   const result = parse(threadHtml);
@@ -11,13 +11,13 @@ test("帖子按主题、楼主、热门回复和当前页楼层分别返回", ()
   assert.equal(result.total_pages, 2);
   assert.equal(result.thread.topic, "示例主题 & 讨论");
   assert.deepEqual(Object.keys(result.thread).sort(), ["hot_replies", "original_post", "replies", "topic"]);
-  assert.equal(result.thread.original_post.article_id, "6454538");
+  assert.equal(result.thread.original_post.article_id, "100001");
   assert.equal(result.thread.original_post.floor, 0);
   assert.equal(result.thread.original_post.author, "DemoOwner");
-  assert.equal(result.thread.original_post.published_at, "Sun Oct 18 09:30:00 2026");
+  assert.equal(result.thread.original_post.published_at, "Sat Jan 01 12:00:00 2000");
   assert.equal(result.thread.original_post.likes, null);
   assert.deepEqual(result.thread.replies.map((reply) => [reply.floor, reply.article_id]), [
-    [1, "6454541"], [2, "6454542"], [3, "6454543"], [6, "6454551"],
+    [1, "100002"], [2, "100003"], [3, "100004"], [6, "100007"],
   ]);
   assert.deepEqual(result.thread.replies.map((reply) => reply.likes), [0, 20, null, 5]);
   assert.deepEqual(Object.keys(result.thread.original_post).sort(), ["article_id", "author", "content", "floor", "likes", "published_at"]);
@@ -28,29 +28,29 @@ test("请求版面名与页面规范名大小写不同时仍解析分页、楼�
     // 不提供 body<ID> 备用标记，确保楼层 ID 来自大小写不同的回复链接。
     const html = threadPage({ page }).replaceAll("Talking", "IWhisper")
       .replaceAll(/\bbody[1-9][0-9]*\b/g, "");
-    const expected = parseThreadPage(html, "IWhisper", "6454538");
+    const expected = parseThreadPage(html, "IWhisper", "100001");
     for (const board of ["iwhisper", "IWHISPER"]) {
-      assert.deepEqual(parseThreadPage(html, board, "6454538"), expected);
+      assert.deepEqual(parseThreadPage(html, board, "100001"), expected);
     }
   }
 });
 
 test("忽略版面大小写仍拒绝其他站点、版面、文章、路由和分享链接参数", () => {
   const html = threadHtml.replaceAll("Talking", "IWhisper");
-  const shareUrl = 'https://bbs.byr.cn/article/IWhisper/6454538';
+  const shareUrl = 'https://bbs.byr.cn/article/IWhisper/100001';
   for (const invalid of [
-    html.replace(`_u="${shareUrl}"`, '_u="https://example.com/article/IWhisper/6454538"'),
-    html.replace(`_u="${shareUrl}"`, '_u="https://bbs.byr.cn/article/Other/6454538"'),
-    html.replace(`_u="${shareUrl}"`, '_u="https://bbs.byr.cn/Article/IWhisper/6454538"'),
+    html.replace(`_u="${shareUrl}"`, '_u="https://example.com/article/IWhisper/100001"'),
+    html.replace(`_u="${shareUrl}"`, '_u="https://bbs.byr.cn/article/Other/100001"'),
+    html.replace(`_u="${shareUrl}"`, '_u="https://bbs.byr.cn/Article/IWhisper/100001"'),
     html.replace(`_u="${shareUrl}"`, '_u="https://bbs.byr.cn/article/IWhisper/9999"'),
     html.replace(`_u="${shareUrl}"`, `_u="${shareUrl}?p=1"`),
     html.replace(`_u="${shareUrl}"`, `_u="${shareUrl}#reply"`),
-    html.replace('href="/article/IWhisper/post/6454541"', 'href="/article/IWhisper/post/6454999"'),
-    html.replace('href="/article/IWhisper/6454538?s=6454551"', 'href="/article/Other/6454538?s=6454551"'),
-    html.replace('href="/article/IWhisper/6454538?s=6454551"', 'href="/Article/IWhisper/6454538?s=6454551"'),
-    html.replace('href="/article/IWhisper/6454538?s=6454551"', 'href="/article/IWhisper/9999?s=6454551"'),
+    html.replace('href="/article/IWhisper/post/100002"', 'href="/article/IWhisper/post/109999"'),
+    html.replace('href="/article/IWhisper/100001?s=100007"', 'href="/article/Other/100001?s=100007"'),
+    html.replace('href="/article/IWhisper/100001?s=100007"', 'href="/Article/IWhisper/100001?s=100007"'),
+    html.replace('href="/article/IWhisper/100001?s=100007"', 'href="/article/IWhisper/9999?s=100007"'),
   ]) {
-    assert.throws(() => parseThreadPage(invalid, "iwhisper", "6454538"), { message: "UNPARSED_PAGE" });
+    assert.throws(() => parseThreadPage(invalid, "iwhisper", "100001"), { message: "UNPARSED_PAGE" });
   }
 });
 
@@ -71,8 +71,8 @@ test("正文去除发信头和来源，保留段落、用户签名、链接和�
 test("热门回复按页面精选列表取独立回复ID，可以跨页并与普通楼层重复", () => {
   const { hot_replies: hot, replies } = parse(threadHtml).thread;
   assert.deepEqual(hot.map((reply) => [reply.article_id, reply.floor, reply.author, reply.likes]), [
-    ["6454551", 6, "DemoSix", 5],
-    ["6454568", 17, "DemoSeventeen", 4],
+    ["100007", 6, "DemoSix", 5],
+    ["100018", 17, "DemoSeventeen", 4],
   ]);
   assert.equal(hot[0].published_at, null);
   assert.match(hot[0].content, /同页热门内容\n【 在 DemoOne 的大作中提到: 】\n: 引用文字/);
@@ -81,7 +81,7 @@ test("热门回复按页面精选列表取独立回复ID，可以跨页并与普
 });
 
 test("匿名版面热门作者留空时仍识别同一回复，保留各区域显示的作者", () => {
-  const result = parseThreadPage(anonymousThreadHtml, "iwhisper", "6454538");
+  const result = parseThreadPage(anonymousThreadHtml, "iwhisper", "100001");
   assert.equal(result.page, 1);
   assert.equal(result.total_pages, 2);
   const { hot_replies: hot, replies } = result.thread;
@@ -102,20 +102,20 @@ test("普通楼层缺失作者时不与热门区域已显示的作者冲突", ()
 
 test("两处作者均隐藏时仍以回复 ID 和楼层确认同一回复", () => {
   const html = anonymousThreadHtml.replaceAll(/<span class="a-u-name">[\s\S]*?<\/span>/g, "");
-  const { hot_replies: hot, replies } = parseThreadPage(html, "iwhisper", "6454538").thread;
+  const { hot_replies: hot, replies } = parseThreadPage(html, "iwhisper", "100001").thread;
   assert.equal(hot[0].author, null);
   assert.equal(replies.find(reply => reply.article_id === hot[0].article_id).author, null);
 });
 
 test("允许缺失作者仍拒绝热门回复与普通楼层的 ID、楼层或已知作者冲突", () => {
   for (const html of [
-    anonymousThreadHtml.replace('?s=6454551', '?s=6454999'),
-    anonymousThreadHtml.replace('?s=6454551">第6楼', '?s=6454551">第7楼'),
+    anonymousThreadHtml.replace('?s=100007', '?s=109999'),
+    anonymousThreadHtml.replace('?s=100007">第6楼', '?s=100007">第7楼'),
     threadHtml.replace('<div class="a-nice-comment-id"><a href="/user/query/DemoSix">DemoSix</a>',
       '<div class="a-nice-comment-id"><a href="/user/query/DemoOther">DemoOther</a>'),
   ]) {
     const board = html.includes("IWhisper") ? "iwhisper" : "Talking";
-    assert.throws(() => parseThreadPage(html, board, "6454538"), { message: "UNPARSED_PAGE" });
+    assert.throws(() => parseThreadPage(html, board, "100001"), { message: "UNPARSED_PAGE" });
   }
 });
 
@@ -149,11 +149,11 @@ test("单页帖子能报告一页，页面缺失的作者和时间返回null", (
 test("未知页面、身份不符和无法识别的楼层不会被当成成功帖子", () => {
   for (const html of [
     "", "<p>维护中</p>",
-    threadHtml.replace('_u="https://bbs.byr.cn/article/Talking/6454538"', '_u="https://example.com/article/Talking/6454538"'),
-    threadHtml.replace('_u="https://bbs.byr.cn/article/Talking/6454538"', '_u="https://bbs.byr.cn/article/Other/6454538"'),
-    threadHtml.replace('_u="https://bbs.byr.cn/article/Talking/6454538"', '_u="https://bbs.byr.cn/article/Talking/9999"'),
+    threadHtml.replace('_u="https://bbs.byr.cn/article/Talking/100001"', '_u="https://example.com/article/Talking/100001"'),
+    threadHtml.replace('_u="https://bbs.byr.cn/article/Talking/100001"', '_u="https://bbs.byr.cn/article/Other/100001"'),
+    threadHtml.replace('_u="https://bbs.byr.cn/article/Talking/100001"', '_u="https://bbs.byr.cn/article/Talking/9999"'),
     threadHtml.replace('<span class="a-pos">沙发</span>', '<span class="a-pos">未知楼层</span>'),
-    threadHtml.replace('href="/article/Talking/post/6454541"', 'href="/article/Talking/post/6454999"'),
+    threadHtml.replace('href="/article/Talking/post/100002"', 'href="/article/Talking/post/109999"'),
   ]) {
     assert.throws(() => parse(html), { message: "UNPARSED_PAGE" });
   }
@@ -163,7 +163,7 @@ test("无法确认分页或热门回复身份时返回解析失败", () => {
   for (const html of [
     threadHtml.replaceAll(/<ol class="page-main">[\s\S]*?<\/ol>/g, ""),
     threadHtml.replace('title="当前页">1</a>', 'title="当前页">2</a>'),
-    threadHtml.replace('href="/article/Talking/6454538?s=6454551"', 'href="/article/Talking/9999?s=6454551"'),
+    threadHtml.replace('href="/article/Talking/100001?s=100007"', 'href="/article/Talking/9999?s=100007"'),
   ]) {
     assert.throws(() => parse(html), { message: "UNPARSED_PAGE" });
   }

@@ -10,7 +10,7 @@ function inspectArticle(input, request) {
   return inspectWithEnvironment(input, request, fakeEnv);
 }
 
-const input = { board: "Talking", article_id: "6454538", page: 1 };
+const input = { board: "Talking", article_id: "100001", page: 1 };
 const loginGbk = Buffer.from("c4faceb4b5c7c2bc2cc7ebb5c7c2bcbaf3bcccd0f8b2d9d7f7", "hex");
 
 function htmlResponse(body, status = 200) {
@@ -24,7 +24,7 @@ test("Cookie 仅发送到固定站点；HTTP 200 登录页仍是登录失效", a
   let calls = 0;
   const result = await inspectArticle(input, async (url, options) => {
     calls++;
-    assert.equal(url, "https://bbs.byr.cn/article/Talking/6454538");
+    assert.equal(url, "https://bbs.byr.cn/article/Talking/100001");
     assert.equal(options.method, "GET");
     const headers = new Headers(options.headers);
     assert.equal(headers.get("X-Requested-With"), "XMLHttpRequest");
@@ -39,7 +39,7 @@ test("Cookie 仅发送到固定站点；HTTP 200 登录页仍是登录失效", a
   assert.equal(calls, 1);
   assert.deepEqual(result, {
     ...input,
-    article_url: "https://bbs.byr.cn/article/Talking/6454538",
+    article_url: "https://bbs.byr.cn/article/Talking/100001",
     http_status: 200,
     content_type: "text/html;charset=GBK",
     result: "AUTH_REQUIRED",
@@ -94,7 +94,7 @@ test("按需读取单页结构化帖子，第二页不额外请求楼主所在�
     let calls = 0;
     const result = await inspectArticle({ ...input, page }, async (url) => {
       calls++;
-      assert.equal(url, `https://bbs.byr.cn/article/Talking/6454538${page === 1 ? "" : "?p=2"}`);
+      assert.equal(url, `https://bbs.byr.cn/article/Talking/100001${page === 1 ? "" : "?p=2"}`);
       return new Response(threadPage({ page }), { headers: { "content-type": "text/html;charset=utf-8" } });
     });
     assert.equal(calls, 1);
@@ -109,9 +109,9 @@ test("按需读取单页结构化帖子，第二页不额外请求楼主所在�
 
 test("匿名帖热门作者缺失时 HTTP 200 返回结构化成功而非 UNPARSED_PAGE", async () => {
   let calls = 0;
-  const result = await inspectArticle({ board: "iwhisper", article_id: "6454538" }, async (url) => {
+  const result = await inspectArticle({ board: "iwhisper", article_id: "100001" }, async (url) => {
     calls++;
-    assert.equal(url, "https://bbs.byr.cn/article/iwhisper/6454538");
+    assert.equal(url, "https://bbs.byr.cn/article/iwhisper/100001");
     return new Response(anonymousThreadHtml, { headers: { "content-type": "text/html;charset=utf-8" } });
   });
   assert.equal(calls, 1);
@@ -231,7 +231,7 @@ test("真实 Node fetch 能发送显式 Cookie，但不会跟随跳转（仅本�
   });
   const localUrl = `http://127.0.0.1:${server.address().port}/article`;
   const request = (url, options) => {
-    assert.equal(url, "https://bbs.byr.cn/article/Talking/6454538");
+    assert.equal(url, "https://bbs.byr.cn/article/Talking/100001");
     // 仅测试中把传输目标换成本地服务，绝不向论坛发送假 Cookie。
     return fetch(localUrl, options);
   };
