@@ -41,16 +41,18 @@ test("Cookie 仅发送到固定站点；HTTP 200 登录页仍是登录失效", a
     http_status: 200,
     content_type: "text/html;charset=GBK",
     result: "AUTH_REQUIRED",
+    content: "您未登录,请登录后继续操作",
   });
-  assert.equal(JSON.stringify(result).includes("您未登录"), false);
+  assert.equal(JSON.stringify(result).includes(fakeEnv.BYR_COOKIE), false);
 });
 
-test("支持响应声明的 UTF-8，丢弃 Set-Cookie，不回传原始 HTML", async () => {
+test("支持响应声明的 UTF-8，保留原始 HTML，但不回传 Set-Cookie", async () => {
   const result = await inspectArticle(input, async () => new Response(
     "<p>您未登录,请登录后继续操作</p>",
     { headers: { "content-type": 'text/html; charset="utf-8"', "set-cookie": "secret=fake" } },
   ));
   assert.equal(result.result, "AUTH_REQUIRED");
+  assert.equal(result.content, "<p>您未登录,请登录后继续操作</p>");
   assert.equal(JSON.stringify(result).includes("secret"), false);
 });
 

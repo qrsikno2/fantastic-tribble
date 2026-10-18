@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-test("入口正常退出，仅向 stderr 输出诊断", () => {
+test("stdio MCP 入口在 stdin 关闭后正常退出，不输出离线示例或噪音", () => {
   const entry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
   const result = spawnSync(process.execPath, [entry], {
     encoding: "utf8",
@@ -12,10 +12,5 @@ test("入口正常退出，仅向 stderr 输出诊断", () => {
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0);
   assert.equal(result.stdout, "");
-  assert.deepEqual(JSON.parse(result.stderr), {
-    board: "Talking",
-    article_id: "6454538",
-    page: 1,
-    article_url: "https://bbs.byr.cn/article/Talking/6454538",
-  });
+  assert.equal(result.stderr, "");
 });
