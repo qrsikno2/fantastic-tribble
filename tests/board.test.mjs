@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildBoardUrl, validateBoardParams } from "../dist/board-params.js";
 import { inspectBoard } from "../dist/inspect-board.js";
+import { sameForumPath } from "../dist/forum-path.js";
+import { boardHtml } from "./fixtures/board-page.mjs";
 
 const fakeEnv = Object.freeze({ BYR_COOKIE: "session=fake-board-tests" });
 const response = (body) => new Response(body, { headers: { "content-type": "text/html;charset=utf-8" } });
@@ -46,4 +48,37 @@ test("缺少认证不发请求；底层网络错误只返回归一错误", async
   assert.equal(calls, 0);
   await assert.rejects(inspectBoard({ board: "Talking" }, async () => { throw new Error(fakeEnv.BYR_COOKIE); }, fakeEnv),
     { message: "REQUEST_FAILED" });
+});
+
+test("论坛返回规范大小写的分页和帖子链接时，大小写不同的请求仍成功", async () => {
+  for (const board of ["IWhisper", "iwhisper", "IWHISPER"]) {
+    let calls = 0;
+    const result = await inspectBoard({ board }, async (url) => {
+      calls++;
+      assert.equal(url, `https://bbs.byr.cn/board/${board}?p=1`);
+      return response(boardHtml);
+    }, fakeEnv);
+    assert.equal(calls, 1);
+    assert.equal(result.result, "OK");
+    assert.equal(result.total_pages, 2);
+    assert.equal(result.threads.length, 1);
+    assert.equal(result.threads[0].article_url, "https://bbs.byr.cn/article/IWhisper/123");
+  }
+});
+
+test("大小写兼容仅限版面名，不接受其他版面、路由或外站链接", async () => {
+  for (const html of [
+    boardHtml.replaceAll("/board/IWhisper", "/board/Other"),
+    boardHtml.replaceAll("/article/IWhisper", "/article/Other"),
+    boardHtml.replaceAll("/board/IWhisper", "https://example.com/board/IWhisper"),
+    boardHtml.replaceAll("/article/IWhisper", "https://example.com/article/IWhisper"),
+    boardHtml.replaceAll("/board/IWhisper", "/Board/IWhisper"),
+  ]) {
+    const result = await inspectBoard({ board: "iwhisper" }, async () => response(html), fakeEnv);
+    assert.equal(result.result, "UNPARSED_PAGE");
+    assert.equal(result.total_pages, null);
+    assert.deepEqual(result.threads, []);
+  }
+  assert.equal(sameForumPath("/article/IWhisper/123", "/article/iwhisper/124"), false);
+  assert.equal(sameForumPath("/article/IWhisper/Post/123", "/article/iwhisper/post/123"), false);
 });

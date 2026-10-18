@@ -18,6 +18,14 @@ test("保留版面大小写及大整数文章 ID", () => {
   );
 });
 
+test("后续页使用经过校验的 p 参数，第一页保持原有地址", () => {
+  assert.equal(buildArticleUrl("Talking", "6454538", 1), "https://bbs.byr.cn/article/Talking/6454538");
+  assert.equal(buildArticleUrl("Talking", "6454538", 2), "https://bbs.byr.cn/article/Talking/6454538?p=2");
+  for (const page of [0, -1, 1.5, "2", null, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => buildArticleUrl("Talking", "6454538", page), /page/);
+  }
+});
+
 for (const board of [undefined, "https://example.com", "//example.com", "../Talking", "Talking?x=1", "Talking#x", "Talking\\Other", "%2e%2e"]) {
   test(`拒绝非法版面：${String(board)}`, () => {
     assert.throws(() => buildArticleUrl(board, "6454538"), /board/);

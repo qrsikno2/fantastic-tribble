@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { inspectArticle as inspectWithEnvironment } from "../dist/inspect-article.js";
+import { anonymousThreadHtml, threadPage } from "./fixtures/thread-page.mjs";
 
 const fakeEnv = Object.freeze({ BYR_COOKIE: "nforum[UTMPUSERID]=demo; session=fake==" });
 
@@ -37,22 +38,25 @@ test("Cookie 仅发送到固定站点；HTTP 200 登录页仍是登录失效", a
   });
   assert.equal(calls, 1);
   assert.deepEqual(result, {
+    ...input,
     article_url: "https://bbs.byr.cn/article/Talking/6454538",
     http_status: 200,
     content_type: "text/html;charset=GBK",
     result: "AUTH_REQUIRED",
-    content: "您未登录,请登录后继续操作",
+    total_pages: null,
+    thread: null,
   });
   assert.equal(JSON.stringify(result).includes(fakeEnv.BYR_COOKIE), false);
 });
 
-test("支持响应声明的 UTF-8，保留原始 HTML，但不回传 Set-Cookie", async () => {
+test("支持响应声明的 UTF-8，结构接口不回传 HTML 或 Set-Cookie", async () => {
   const result = await inspectArticle(input, async () => new Response(
     "<p>您未登录,请登录后继续操作</p>",
     { headers: { "content-type": 'text/html; charset="utf-8"', "set-cookie": "secret=fake" } },
   ));
   assert.equal(result.result, "AUTH_REQUIRED");
-  assert.equal(result.content, "<p>您未登录,请登录后继续操作</p>");
+  assert.equal(Object.hasOwn(result, "content"), false);
+  assert.equal(result.thread, null);
   assert.equal(JSON.stringify(result).includes("secret"), false);
 });
 
@@ -77,12 +81,60 @@ test("非 2xx 返回 HTTP_ERROR，停止读取正文", async () => {
   assert.equal(cancelled, true);
 });
 
-test("page>1 和非法参数在请求前拒绝", async () => {
+test("非法参数在请求前拒绝", async () => {
   let calls = 0;
   const request = async () => { calls++; return htmlResponse(""); };
-  await assert.rejects(inspectArticle({ ...input, page: 2 }, request), /PAGE_NOT_SUPPORTED/);
+  await assert.rejects(inspectArticle({ ...input, page: 0 }, request), /page/);
   await assert.rejects(inspectArticle({ ...input, board: "../Talking" }, request), /board/);
   assert.equal(calls, 0);
+});
+
+test("按需读取单页结构化帖子，第二页不额外请求楼主所在页", async () => {
+  for (const page of [1, 2]) {
+    let calls = 0;
+    const result = await inspectArticle({ ...input, page }, async (url) => {
+      calls++;
+      assert.equal(url, `https://bbs.byr.cn/article/Talking/6454538${page === 1 ? "" : "?p=2"}`);
+      return new Response(threadPage({ page }), { headers: { "content-type": "text/html;charset=utf-8" } });
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.result, "OK");
+    assert.equal(result.page, page);
+    assert.equal(result.total_pages, 2);
+    assert.equal(Object.hasOwn(result, "content"), false);
+    assert.equal(result.thread.topic, "示例主题 & 讨论");
+    assert.equal(result.thread.original_post?.floor ?? null, page === 1 ? 0 : null);
+  }
+});
+
+test("匿名帖热门作者缺失时 HTTP 200 返回结构化成功而非 UNPARSED_PAGE", async () => {
+  let calls = 0;
+  const result = await inspectArticle({ board: "iwhisper", article_id: "6454538" }, async (url) => {
+    calls++;
+    assert.equal(url, "https://bbs.byr.cn/article/iwhisper/6454538");
+    return new Response(anonymousThreadHtml, { headers: { "content-type": "text/html;charset=utf-8" } });
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.http_status, 200);
+  assert.equal(result.result, "OK");
+  assert.equal(result.page, 1);
+  assert.equal(result.total_pages, 2);
+  assert.equal(result.thread.hot_replies[0].author, null);
+  assert.equal(result.thread.replies.find(reply => reply.floor === 6).author, "IWhisper#123");
+  assert.equal(Object.hasOwn(result, "content"), false);
+});
+
+test("越界及服务器返回错误页码时不返回其他页的帖子", async () => {
+  for (const [page, returnedPage, expected] of [[3, 2, "PAGE_OUT_OF_RANGE"], [2, 1, "UNPARSED_PAGE"]]) {
+    const result = await inspectArticle({ ...input, page }, async () => new Response(threadPage({ page: returnedPage }), {
+      headers: { "content-type": "text/html;charset=utf-8" },
+    }));
+    assert.equal(result.result, expected);
+    assert.equal(result.page, page);
+    assert.equal(result.thread, null);
+    assert.equal(Object.hasOwn(result, "content"), false);
+    assert.equal(result.total_pages, expected === "PAGE_OUT_OF_RANGE" ? 2 : null);
+  }
 });
 
 test("响应分块合计超过 2 MiB 时取消读取", async () => {

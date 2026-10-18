@@ -3,11 +3,16 @@ import * as z from "zod/v4";
 import { inspectArticle } from "./inspect-article.js";
 import { inspectBoard } from "./inspect-board.js";
 import { inspectBoardDirectory } from "./inspect-board-directory.js";
+import { inspectRawWebsite } from "./raw-website.js";
 import { isSectionId } from "./parse-board-directory.js";
-import { validateThreadParams } from "./thread-params.js";
 
 const boardSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/).refine((value) => !/\s/.test(value));
 const pageSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional();
+const threadInputSchema = {
+  board: boardSchema,
+  article_id: z.string().regex(/^[1-9][0-9]*$/).refine((value) => !/\s/.test(value)),
+  page: pageSchema,
+};
 const publicErrors = new Set([
   "AUTH_REQUIRED",
   "COOKIE_INVALID",
@@ -62,52 +67,61 @@ export function createServer(
   server.registerTool(
     "get_thread",
     {
-      description: "读取北邮人论坛帖子第一页，返回页面状态和原始 HTML，尚不解析正文",
-      inputSchema: {
-        board: z.string(),
-        article_id: z.string(),
-        page: z.number().int().positive().optional(),
-      },
+      description: "读取北邮人论坛指定页的帖子结构：主题、楼主发言、热门回复和每一楼的回复。page 默认为 1，每次只请求一页；不返回原始 HTML",
+      inputSchema: threadInputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: true },
     },
     async (input) => {
-      const params = validateThreadParams(input);
-      const result = await inspectArticle(params, request, env);
-
-      return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
-      };
+      try {
+        const inspection = await inspectArticle(input, request, env);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
+          ...(inspection.result === "OK" ? {} : { isError: true }),
+        };
+      } catch (error) {
+        return toolError(error);
+      }
     },
   );
 
-  async function readBoard(input: { board: string; page?: number }, infoOnly: boolean) {
-    try {
-      const inspection = await inspectBoard(input, request, env);
-      const { threads, ...metadata } = inspection;
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(infoOnly ? metadata : inspection) }],
-        ...(inspection.result === "OK" ? {} : { isError: true }),
-      };
-    } catch (error) {
-      return toolError(error);
-    }
-  }
-
   server.registerTool(
-    "get_board_info",
+    "get_raw_website",
     {
-      description: "查询北邮人论坛版面（分组）及当前账号可见的总页数；只请求第一页，不遍历各页",
-      inputSchema: { board: boardSchema },
+      description: "读取北邮人论坛指定帖子的原始网页 HTML，保留页面内容用于检查。board 和 article_id 必填，page 默认为 1；每次只请求一页，OK 仅表示网页获取成功",
+      inputSchema: threadInputSchema,
+      annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async ({ board }) => readBoard({ board, page: 1 }, true),
+    async (input) => {
+      try {
+        const inspection = await inspectRawWebsite(input, request, env);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
+          ...(inspection.result === "OK" ? {} : { isError: true }),
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
   );
 
   server.registerTool(
     "get_board_threads",
     {
-      description: "读取北邮人论坛指定版面的第 page 页帖子列表及总页数，page 默认为 1；每次只请求一页",
+      description: "读取北邮人论坛指定版面的帖子列表，同时返回版面信息、当前页 page 和总页数 total_pages。page 默认为 1；每次只请求一页，不遍历各页",
       inputSchema: { board: boardSchema, page: pageSchema },
+      annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async (input) => readBoard(input, false),
+    async (input) => {
+      try {
+        const inspection = await inspectBoard(input, request, env);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
+          ...(inspection.result === "OK" ? {} : { isError: true }),
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
   );
 
   return server;
