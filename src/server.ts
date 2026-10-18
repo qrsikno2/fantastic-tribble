@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
 import { inspectArticle } from "./inspect-article.js";
 import { inspectBoard } from "./inspect-board.js";
+import { inspectBoardDirectory } from "./inspect-board-directory.js";
+import { isSectionId } from "./parse-board-directory.js";
 import { validateThreadParams } from "./thread-params.js";
 
 const boardSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/).refine((value) => !/\s/.test(value));
@@ -16,6 +18,16 @@ const publicErrors = new Set([
   "REQUEST_FAILED",
 ]);
 
+function toolError(error: unknown) {
+  const result = error instanceof Error && publicErrors.has(error.message)
+    ? error.message
+    : "REQUEST_FAILED";
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify({ result }) }],
+    isError: true,
+  };
+}
+
 export function createServer(
   request: typeof fetch = fetch,
   env: NodeJS.ProcessEnv = process.env,
@@ -24,6 +36,28 @@ export function createServer(
     name: "fantastic-tribble",
     version: "0.1.0",
   });
+
+  server.registerTool(
+    "list_boards",
+    {
+      description: "列出北邮人论坛版面英文名、中文名、链接及所属分区。省略 section 时顺序读取全部分区目录；传入返回的分区编号字符串可只查询该分区。不读取帖子内容",
+      inputSchema: {
+        section: z.string().refine(isSectionId).optional().describe("可选分区编号字符串，例如 1；省略时列出全部版面"),
+      },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async (input) => {
+      try {
+        const inspection = await inspectBoardDirectory(input, request, env);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
+          ...(inspection.result === "OK" ? {} : { isError: true }),
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
 
   server.registerTool(
     "get_thread",
@@ -54,13 +88,7 @@ export function createServer(
         ...(inspection.result === "OK" ? {} : { isError: true }),
       };
     } catch (error) {
-      const result = error instanceof Error && publicErrors.has(error.message)
-        ? error.message
-        : "REQUEST_FAILED";
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ result }) }],
-        isError: true,
-      };
+      return toolError(error);
     }
   }
 

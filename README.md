@@ -2,16 +2,16 @@
 
 面向北邮人论坛的轻量级只读 MCP 服务。
 
-`fantastic-tribble` 通过 stdio MCP 提供北邮人论坛版面查询和帖子读取。调用方提交版面英文名及页码，服务负责认证、请求、解码、解析和错误归一化。项目针对低资源服务器设计，默认采用按需请求、单页读取和无状态运行方式。
+`fantastic-tribble` 通过 stdio MCP 提供北邮人论坛版面目录、版面查询和帖子读取。调用方可先列出版面，再提交版面英文名及页码，服务负责认证、请求、解码、解析和错误归一化。项目针对低资源服务器设计，采用按需请求和无状态运行方式；帖子列表每次只读取一页。
 
 > [!IMPORTANT]
-> 项目目前处于早期开发阶段。已提供版面页数查询、指定页帖子列表及 stdio MCP 入口，并使用本地认证验证了 `Talking` 的前两页。`get_thread` 仍只读取帖子第一页并返回原始 HTML，尚未解析正文和回复；其他版面和 Hermes 客户端联调尚待验证。
+> 项目目前处于早期开发阶段。已提供版面目录、版面页数查询、指定页帖子列表及 stdio MCP 入口，并使用本地认证验证了 `Talking` 的前两页。`get_thread` 仍只读取帖子第一页并返回原始 HTML，尚未解析正文和回复；其他版面的帖子列表和 Hermes 客户端联调尚待验证。
 
 ## 设计目标
 
 - **固定数据源**：仅访问 `https://bbs.byr.cn`，调用方不能指定任意主机或请求路径。
-- **最小工具接口**：`get_board_info(board)`、`get_board_threads(board, page = 1)` 和 `get_thread(board, article_id, page = 1)`。
-- **凭据与内容分离**：Hermes 只传文章参数，Cookie 由 MCP 进程环境提供。
+- **工具接口**：`list_boards(section?)`、`get_board_info(board)`、`get_board_threads(board, page = 1)` 和 `get_thread(board, article_id, page = 1)`。
+- **凭据与内容分离**：Hermes 只传查询参数，Cookie 由 MCP 进程环境提供。
 - **低资源占用**：不常驻浏览器，不依赖数据库、Redis 或向量索引。
 - **保守失败**：未知页面不会被当作成功结果；HTTP 200 也必须继续检查页面语义。
 - **可测试性**：网络函数和环境变量均可注入，自动测试不依赖真实论坛账号。
@@ -63,11 +63,12 @@
 | Cookie 配置 | 已完成 | 统一读取 `process.env.BYR_COOKIE` |
 | 中文解码 | 已完成 | 根据响应声明处理 GBK、UTF-8 等编码 |
 | 登录态实测 | 部分验证 | 本地 Cookie 可读取 `Talking` 前两页；快速连续请求会触发论坛限流 |
+| 版面目录 | 已完成 | 列出全部或指定分区的版面英文名、中文名和链接，不读取帖子 |
 | 版面页数查询 | 已完成 | 从当前账号所见分页栏读取 `total_pages`，不遍历所有页 |
 | 版面帖子列表 | 已完成 | 按 `page` 读取帖子标题、链接及页面提供的元数据 |
 | 正文与回复解析 | 规划中 | `get_thread` 仍返回第一页原始 HTML |
 | 帖子内部翻页 | 规划中 | `get_thread` 只接受 `page = 1` |
-| MCP 工具注册 | 已完成 | 通过 stdio 提供三个只读工具 |
+| MCP 工具注册 | 已完成 | 通过 stdio 提供四个只读工具 |
 | Hermes 集成 | 待验证 | 使用下方 stdio 配置，尚未完成真实客户端联调 |
 
 ## 快速开始
@@ -103,7 +104,38 @@ npm start
 
 ## 版面查询工具
 
-这里的“分组”对应论坛版面，`board` 填英文版面名，例如 `Talking`。页码从 1 开始；每次调用只请求一页，不批量抓取整个版面。
+这里的“分组”对应论坛版面，`board` 填英文版面名，例如 `Talking`。页码从 1 开始；读取帖子列表时每次只请求一页，不批量抓取整个版面。
+
+### 列出有哪些版面
+
+工具名：`list_boards`
+
+列出全部版面，无须先知道英文版面名：
+
+```json
+{}
+```
+
+也可以只列出一个分区的版面（分区编号使用字符串）：
+
+```json
+{"section":"1"}
+```
+
+成功结果包含 `result: "OK"`、`section`（全站查询为 `null`）、`total_boards`、`sections` 和 `boards`，以及 HTTP 状态与内容类型：
+
+| 字段 | 含义 |
+|---|---|
+| `sections[].section`、`name`、`section_url` | 分区编号、中文名称和链接，可用编号缩小下次查询范围 |
+| `boards[].board`、`name`、`board_url` | 版面英文名、中文名称和固定站点链接；`board` 可直接传给其他工具 |
+| `boards[].sections` | 版面所属分区编号数组；跨区出现的同一版面合并为一条 |
+| `total_boards` | 本次返回的去重版面数 |
+
+服务先请求分区目录，再顺序读取所选分区的版面目录。当前全站有 10 个分区，因此默认调用需要 11 次小型目录请求；指定分区需要 2 次。论坛接口直接展开子目录，服务不抓取帖子、不并发请求、不自动重试。最多接受 32 个分区，超过时返回 `UNPARSED_PAGE`。
+
+目录查询会在本次调用的内存中接收论坛刷新的三个会话 Cookie（`nforum[UTMPKEY]`、`nforum[UTMPNUM]`、`nforum[UTMPUSERID]`），避免后续目录请求继续使用旧会话而反复登录。只接受匹配论坛域名和目录路径的更新，不接受密码 Cookie 更新，不修改环境变量或 `.env`，调用结束即丢弃。
+
+任一分区请求或解析失败，整个调用返回 MCP 错误，不把部分目录当作完整结果；未知分区返回 `SECTION_NOT_FOUND`。正常的空分区返回 `result: "OK"`、`boards: []` 和 `total_boards: 0`。目录以论坛返回的信息为准，列出版面不保证当前账号可以读取其中的所有帖子。
 
 ### 查询版面页数
 
@@ -209,6 +241,9 @@ process.env.BYR_COOKIE
 │   ├── inspect-article.ts # 帖子第一页请求
 │   ├── parse-board.ts     # 版面分页与帖子列表 HTML 解析
 │   ├── inspect-board.ts   # 版面单页请求、分页和帖子列表
+│   ├── parse-board-directory.ts # 分区及版面目录 JSON 校验
+│   ├── inspect-board-directory.ts # 全站/指定分区目录及跨区去重
+│   ├── directory-session.ts # 仅目录调用内使用的临时会话刷新
 │   ├── server.ts          # MCP 工具注册及可注入的服务工厂
 │   └── index.ts           # stdio MCP 入口
 ├── tests/                 # Node.js 内置测试运行器用例
@@ -229,7 +264,10 @@ process.env.BYR_COOKIE
 | `src/inspect-article.ts` | 帖子第一页请求 |
 | `src/parse-board.ts` | 版面分页和帖子列表解析 |
 | `src/inspect-board.ts` | 版面单页请求及结构化结果 |
-| `src/server.ts` | 三个 MCP 工具及可注入的服务工厂 |
+| `src/parse-board-directory.ts` | 分区及版面目录 JSON 校验 |
+| `src/inspect-board-directory.ts` | 顺序读取目录、按分区筛选及跨区去重 |
+| `src/directory-session.ts` | 仅目录调用内使用的临时会话刷新，不持久化 Cookie |
+| `src/server.ts` | 四个 MCP 工具及可注入的服务工厂 |
 | `src/index.ts` | stdio MCP 入口 |
 | `.env.example` | 不含凭据的公开配置模板 |
 
@@ -250,7 +288,7 @@ process.env.BYR_COOKIE
 - 版面和文章 ID 必须通过运行时校验，不能注入协议、主机或额外路径。
 - 自动重定向被拒绝，Cookie 不会跟随跳转发送到其他地址。
 - 单次响应在解码前限制为 2 MiB，请求超时为 15 秒。
-- 不自动重试，不存储响应中的 `Set-Cookie`，不把底层异常或凭据原样返回。
+- 不自动重试；目录查询仅在单次调用内更新三个会话 Cookie，其他工具不接收 `Set-Cookie`，所有工具都不持久化认证信息或原样返回底层异常、凭据。
 
 ### 内容边界
 
@@ -266,13 +304,14 @@ process.env.BYR_COOKIE
 | `COOKIE_INVALID` | Cookie 格式、字符或长度不符合要求 |
 | `PAGE_NOT_SUPPORTED` | `get_thread` 收到第一页以外的请求 |
 | `PAGE_OUT_OF_RANGE` | 版面请求页码超过页面报告的总页数 |
+| `SECTION_NOT_FOUND` | 指定分区不在论坛返回的分区目录中 |
 | `HTTP_ERROR` | 服务器返回非 2xx HTTP 状态 |
 | `REQUEST_TIMEOUT` | 请求或响应读取超过 15 秒 |
 | `RATE_LIMITED` | 论坛返回 HTTP 429 或已确认的“请勿频繁登录”提示，需稍后重试 |
 | `RESPONSE_TOO_LARGE` | 响应正文超过 2 MiB |
 | `DECODE_ERROR` | 响应字符编码无法可靠解码 |
 | `REQUEST_FAILED` | 网络、流读取或重定向等未分类失败 |
-| `UNPARSED_PAGE` | 版面页面结构或页码无法确认；`get_thread` 则表示正文尚未解析 |
+| `UNPARSED_PAGE` | 版面目录、页面结构或页码无法确认；`get_thread` 则表示正文尚未解析 |
 
 Cookie 语法通过校验并不等于登录态有效；只有真实授权请求成功并完成页面解析后，才能确认读帖链路可用。
 
@@ -285,9 +324,11 @@ npm test        # 编译并自动发现、运行全部测试
 npm start       # 启动 stdio MCP 服务
 ```
 
-自动测试覆盖参数校验、认证配置、HTTP 传输、MCP 工具注册和错误处理，使用假 Cookie 和临时 `.env`。MCP 测试通过内存传输验证工具发现和错误返回；涉及 HTTP 传输的集成测试仅访问本机回环服务。测试不读取项目中的真实 `.env`，也不访问北邮人论坛。版面页数和帖子列表的成功解析依靠授权登录后的实测验证。
+自动测试覆盖参数校验、认证配置、HTTP 传输、版面目录合并、MCP 工具注册和错误处理，使用假 Cookie 和临时 `.env`。MCP 测试通过内存传输验证工具发现、目录调用和错误返回；涉及 HTTP 传输的集成测试仅访问本机回环服务。测试不读取项目中的真实 `.env`，也不访问北邮人论坛。版面页数和帖子列表的成功解析依靠授权登录后的实测验证。
 
 2026-10-18 额外进行了少量只读实测：`Talking` 第 1、2 页分别成功解析，分页栏当时报告 163 页，每页返回 30 条记录；未遍历全部页面。快速连续请求曾触发 GBK 编码却标注 UTF-8 的“请勿频繁登录”响应，已加入独立的 `RATE_LIMITED` 处理和回归测试。以上计数随论坛内容变化。
+
+同日实测 `list_boards` 默认全站查询成功：11 次目录请求返回 10 个分区、286 个去重版面，其中包含 `Linux（Linux操作系统）` 和 `Talking（谈天说地）`。目录查询使用调用内临时会话后可连续完成；未逐版面验证帖子读取权限，目录数量可能变化。
 
 ## 路线图
 
