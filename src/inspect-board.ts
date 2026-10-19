@@ -1,5 +1,6 @@
 import { buildBoardUrl, validateBoardParams, type BoardInput } from "./board-params.js";
 import { fetchForumHtml } from "./forum-http.js";
+import type { ForumPageReader } from "./forum-session.js";
 import { parseBoardPage, type BoardThread } from "./parse-board.js";
 
 export type BoardInspection = {
@@ -17,10 +18,11 @@ export async function inspectBoard(
   input: BoardInput,
   request: typeof fetch = fetch,
   env: NodeJS.ProcessEnv = process.env,
+  readPage?: ForumPageReader,
 ): Promise<BoardInspection> {
   const params = validateBoardParams(input);
   const board_url = buildBoardUrl(params);
-  const response = await fetchForumHtml(board_url, request, env);
+  const response = await (readPage ? readPage(board_url) : fetchForumHtml(board_url, request, env));
   const base: BoardInspection = {
     ...params,
     board_url,

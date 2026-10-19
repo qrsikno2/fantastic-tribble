@@ -1,5 +1,6 @@
 import { buildArticleUrl } from "./article-url.js";
 import { fetchForumHtml } from "./forum-http.js";
+import type { ForumPageReader } from "./forum-session.js";
 import { parseThreadPage, type Thread } from "./parse-thread.js";
 import { validateThreadParams } from "./thread-params.js";
 import type { ThreadInput } from "./thread-params.js";
@@ -21,10 +22,11 @@ export async function inspectArticle(
   input: ThreadInput,
   request: typeof fetch = fetch,
   env: NodeJS.ProcessEnv = process.env,
+  readPage?: ForumPageReader,
 ): Promise<ArticleInspection> {
   const params = validateThreadParams(input);
   const article_url = buildArticleUrl(params.board, params.article_id, params.page);
-  const response = await fetchForumHtml(article_url, request, env);
+  const response = await (readPage ? readPage(article_url) : fetchForumHtml(article_url, request, env));
   const base: ArticleInspection = {
     ...params, article_url, http_status: response.http_status, content_type: response.content_type,
     result: response.result, total_pages: null, thread: null,

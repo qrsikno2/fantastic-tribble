@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -44,8 +47,8 @@ test("get_board_threads returns metadata, current page, total pages and threads 
   }
 });
 
-async function connect(t, request = async () => { throw new Error("unexpected request"); }, env = fakeEnv) {
-  const server = createServer(request, env);
+async function connect(t, request = async () => { throw new Error("unexpected request"); }, env = fakeEnv, options = { cookieFile: null }) {
+  const server = createServer(request, env, options);
   const client = new Client({ name: "forumcp-tests", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -105,6 +108,11 @@ test("tools/list exposes board tools and separate structured/raw article tools",
 });
 
 test("get_board_rss reads a public feed without accessing credentials or sending authentication", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "forumcp-rss-session-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cookieFile = join(directory, "session-cookie.txt");
+  const privateContent = "invalid private session must not affect RSS";
+  await writeFile(cookieFile, privateContent, { mode: 0o600 });
   const rss = `<?xml version="1.0" encoding="UTF-8"?>
     <rss version="2.0"><channel>
       <title>Health - 健康生活</title><link>https://bbs.byr.cn/board/Health</link>
@@ -127,7 +135,7 @@ test("get_board_rss reads a public feed without accessing credentials or sending
       assert.equal(headers.has("authorization"), false);
       assert.equal(init?.credentials, "omit");
       return new Response(rss, { headers: { "content-type": "text/xml; charset=utf-8" } });
-    }, env);
+    }, env, { cookieFile });
     const result = await client.callTool({ name: "get_board_rss", arguments: { board: "Health" } });
     assert.notEqual(result.isError, true);
     assert.deepEqual(payload(result), {
@@ -141,6 +149,7 @@ test("get_board_rss reads a public feed without accessing credentials or sending
       }],
     });
     assert.equal(calls, 1);
+    assert.equal(await readFile(cookieFile, "utf8"), privateContent);
   }
 });
 
@@ -289,6 +298,57 @@ test("missing authentication is a controlled MCP tool error without fetching", a
     assert.equal(result.isError, true);
     assert.deepEqual(payload(result), { result: "AUTH_REQUIRED" });
   }
+  assert.equal(calls, 0);
+});
+
+test("authenticated MCP tools share refreshed cookies across directory, board, thread and raw calls", async (t) => {
+  const initialCookie = "nforum[UTMPUSERID]=demo; nforum[UTMPKEY]=key-0; nforum[UTMPNUM]=1; nforum[PASSWORD]=fake-password";
+  const env = { BYR_COOKIE: initialCookie };
+  let calls = 0;
+  const client = await connect(t, async (url, init) => {
+    const cookie = new Headers(init.headers).get("cookie");
+    assert.match(cookie, new RegExp(`(?:^|; )nforum\\[UTMPKEY\\]=key-${calls}(?:;|$)`));
+    assert.match(cookie, /(?:^|; )nforum\[PASSWORD\]=fake-password(?:;|$)/);
+    calls += 1;
+    let response;
+    if (url.endsWith("root=list-section&bo=1")) response = jsonResponse([{ name: 0, desc: "本站站务" }]);
+    else if (url.endsWith("root=sec-0&bo=1")) response = jsonResponse([{ name: "Notice", desc: "站务公告" }]);
+    else if (url.includes("/board/")) response = htmlResponse(boardHtml);
+    else response = htmlResponse(threadPage({ page: 1 }));
+    response.headers.append("set-cookie", `nforum[UTMPKEY]=key-${calls}; Path=/; Secure; HttpOnly`);
+    response.headers.append("set-cookie", "nforum[UTMPUSERID]=demo; Path=/; Secure; HttpOnly");
+    return response;
+  }, env);
+  for (const [name, args] of [
+    ["list_boards", {}],
+    ["get_board_threads", { board: "IWhisper" }],
+    ["get_thread", { board: "Talking", article_id: "100001" }],
+    ["get_raw_website", { board: "Talking", article_id: "100001" }],
+  ]) {
+    const result = await client.callTool({ name, arguments: args });
+    assert.notEqual(result.isError, true, name);
+    assert.equal(payload(result).result, "OK", name);
+  }
+  assert.equal(calls, 5);
+  assert.equal(env.BYR_COOKIE, initialCookie);
+});
+
+test("MCP exposes session storage failure without fetching or leaking file content", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "forumcp-mcp-session-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const cookieFile = join(directory, "session-cookie.txt");
+  const privateContent = "broken session containing private credentials";
+  await writeFile(cookieFile, privateContent, { mode: 0o600 });
+  let calls = 0;
+  const client = await connect(t, async () => {
+    calls += 1;
+    return htmlResponse(boardHtml);
+  }, fakeEnv, { cookieFile });
+  const result = await client.callTool({ name: "get_board_threads", arguments: { board: "IWhisper" } });
+  assert.equal(result.isError, true);
+  assert.deepEqual(payload(result), { result: "SESSION_STORAGE_ERROR" });
+  assert.equal(JSON.stringify(result).includes(privateContent), false);
+  assert.equal(await readFile(cookieFile, "utf8"), privateContent);
   assert.equal(calls, 0);
 });
 

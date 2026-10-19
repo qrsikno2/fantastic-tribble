@@ -2,7 +2,7 @@
 
 面向北邮人论坛的轻量级只读 MCP 服务。
 
-`fantastic-tribble` 通过 stdio MCP 提供北邮人论坛版面目录、版面查询和结构化帖子读取。`get_board_rss` 可直接通过公开 RSS 获取单个版面的帖子粗列表，无需账号、密码或 Cookie（不支持 `iwhisper`）。目录、分页列表和帖子正文使用 Cookie 认证；调用方只需提交查询参数。项目针对低资源服务器设计，采用按需请求和无状态运行方式；分页列表和帖子正文每次只读取一页。需要原始 HTML 时单独调用 `get_raw_website`。
+`fantastic-tribble` 通过 stdio MCP 提供北邮人论坛版面目录、版面查询和结构化帖子读取。`get_board_rss` 可直接通过公开 RSS 获取单个版面的帖子粗列表，无需账号、密码或 Cookie（不支持 `iwhisper`）。目录、分页列表和帖子正文共享 Cookie 会话，接收论坛刷新后保存到本地，供后续调用和重启恢复；调用方只需提交查询参数。项目针对低资源服务器设计，采用按需请求；分页列表和帖子正文每次只读取一页。需要原始 HTML 时单独调用 `get_raw_website`。
 
 > [!IMPORTANT]
 > 项目目前处于早期开发阶段。已提供无需认证的 RSS 粗列表、版面目录、版面页数查询、指定页帖子列表和结构化帖子读取。`get_thread` 返回主题、楼主发言、热门回复和当前页各楼回复；原始 HTML 由 `get_raw_website` 提供。更多帖子样式和客户端兼容性尚待验证。
@@ -11,7 +11,7 @@
 
 - **固定数据源**：仅访问 `https://bbs.byr.cn`，调用方不能指定任意主机或请求路径。
 - **工具接口**：`list_boards(section?)`、`get_board_rss(board)`、`get_board_threads(board, page = 1)`、`get_thread(board, article_id, page = 1)` 和 `get_raw_website(board, article_id, page = 1)`。
-- **凭据与内容分离**：MCP 客户端只传查询参数；RSS 请求不读取或发送 Cookie，其他工具的 Cookie 由服务进程环境提供。
+- **凭据与内容分离**：MCP 客户端只传查询参数；RSS 不读取环境凭据或会话文件，也不发送 Cookie。其他工具从本地会话恢复，首次使用由 `BYR_COOKIE` 提供种子。
 - **低资源占用**：不常驻浏览器，不依赖数据库、Redis 或向量索引。
 - **保守解析**：结构化接口在 HTTP 200 后继续检查页面语义；原始网页接口的成功仅表示获取成功。
 - **可测试性**：网络函数和环境变量均可注入，自动测试不依赖真实论坛账号。
@@ -40,7 +40,7 @@
        参数校验与地址构造
             │
             ▼
-      BYR_COOKIE 认证请求
+      共享 Cookie 会话请求
             │
             ▼
        GBK / UTF-8 解码
@@ -60,7 +60,7 @@
 | 参数校验 | 已完成 | 校验英文版面名、文章 ID 和安全正整数页码 |
 | 固定站点地址 | 已完成 | 仅生成北邮人论坛目录、RSS、版面和文章路径 |
 | HTTP 请求 | 已完成 | 15 秒超时、2 MiB 响应上限、拒绝自动跳转 |
-| Cookie 配置 | 已完成 | 认证工具统一读取 `process.env.BYR_COOKIE`，RSS 工具不读取 |
+| Cookie 配置 | 已完成 | `BYR_COOKIE` 初始化共享会话，刷新后原子保存并支持重启恢复；RSS 不读取 |
 | 中文解码 | 已完成 | 根据响应声明处理 GBK、UTF-8 等编码 |
 | 登录状态检查 | 已完成 | 识别未登录提示和论坛限流响应 |
 | 版面目录 | 已完成 | 列出全部或指定分区的版面英文名、中文名和链接，不读取帖子 |
@@ -113,7 +113,7 @@ npm start
 npx -y fantastic-tribble
 ```
 
-`npx` 会下载包及运行依赖，并启动已经编译好的服务；首次使用需要访问 npm。此命令启动的是 stdio MCP 服务，等待输入时没有界面或启动提示。仅使用 `get_board_rss` 时无需配置环境变量；其他工具需通过进程环境变量配置 `BYR_COOKIE`，详见下方客户端示例。`npx` 启动时不会自动读取当前目录的 `.env`。
+`npx` 会下载包及运行依赖，并启动已经编译好的服务；首次使用需要访问 npm。此命令启动的是 stdio MCP 服务，等待输入时没有界面或启动提示。仅使用 `get_board_rss` 时无需配置环境变量；其他工具首次使用需配置 `BYR_COOKIE`，之后可从会话文件恢复，详见下方客户端示例。`npx` 启动时不会自动读取当前目录的 `.env`。
 
 ## 版面查询工具
 
@@ -168,7 +168,7 @@ RSS 仅返回订阅中的粗列表，可能经过论坛缓存，也不保证覆�
 
 服务先请求分区目录，再顺序读取所选分区的版面目录。默认调用的请求次数为分区数加一；指定分区需要 2 次。论坛接口直接展开子目录，服务不抓取帖子、不并发请求、不自动重试。最多接受 32 个分区，超过时返回 `UNPARSED_PAGE`。
 
-目录查询会在本次调用的内存中接收论坛刷新的三个会话 Cookie（`nforum[UTMPKEY]`、`nforum[UTMPNUM]`、`nforum[UTMPUSERID]`），避免后续目录请求继续使用旧会话而反复登录。只接受匹配论坛域名和目录路径的更新，不接受密码 Cookie 更新，不修改环境变量或 `.env`，调用结束即丢弃。
+目录查询与分页列表、结构化帖子和原始网页工具共用同一会话。论坛刷新的 Cookie 会供后续请求使用，并保存到会话文件；服务不会修改环境变量或 `.env`。Cookie 的域名、路径和过期时间按服务器属性处理，具体规则见下方认证配置。
 
 任一分区请求或解析失败，整个调用返回 MCP 错误，不把部分目录当作完整结果；未知分区返回 `SECTION_NOT_FOUND`。正常的空分区返回 `result: "OK"`、`boards: []` 和 `total_boards: 0`。目录以论坛返回的信息为准，列出版面不保证当前账号可以读取其中的所有帖子。
 
@@ -253,7 +253,7 @@ RSS 仅返回订阅中的粗列表，可能经过论坛缓存，也不保证覆�
 
 ## 认证配置
 
-`get_board_rss` 无需认证：仅使用 RSS 时可跳过本节的 Cookie 配置，也无需创建 `.env`。`list_boards`、`get_board_threads`、`get_thread` 和 `get_raw_website` 仍需配置 `BYR_COOKIE`；服务不接受账号或密码参数。
+`get_board_rss` 无需认证：仅使用 RSS 时可跳过本节的 Cookie 配置，也无需创建 `.env`；它不会读取或创建会话文件。`list_boards`、`get_board_threads`、`get_thread` 和 `get_raw_website` 共享认证会话，首次使用需配置 `BYR_COOKIE`；服务不接受账号或密码参数。
 
 ### 本地开发
 
@@ -275,9 +275,30 @@ BYR_COOKIE="name=value; other=value"
 - 不包含 `Cookie:` 前缀；
 - 不使用服务器响应中的 `Set-Cookie` 原文；
 - 不把真实值写入聊天、日志或 Git；
-- Cookie 更新后需要重启进程。
+- 手动修改 `BYR_COOKIE` 后需要重启进程；论坛返回的会话刷新会自动生效。
 
 启动脚本使用 Node.js 的 `--env-file-if-exists=.env` 加载本地配置。进程已有的环境变量优先于 `.env` 文件。
+
+### 会话刷新与重启恢复
+
+第一次调用认证工具时才读取凭据和会话文件；启动服务、发现工具或仅调用 RSS 均不会触碰会话存储。默认文件是**服务进程工作目录**下的 `data/session-cookie.txt`，可用 `BYR_COOKIE_FILE` 指定其他路径，例如：
+
+```dotenv
+BYR_COOKIE_FILE="/absolute/path/to/forumcp/data/session-cookie.txt"
+```
+
+建议 MCP 客户端配置绝对路径，以免客户端工作目录变化时创建另一份会话。虽然扩展名是 `.txt`，文件内容是带 `seed_hash` 等元数据的 JSON cookie jar，不是可以直接复制到请求头的 Cookie 字符串。服务原子保存文件，文件权限为 `600`，新建存储目录权限为 `700`；`data/` 已被 Git 忽略。
+
+- 首次没有文件时，用 `BYR_COOKIE` 初始化。原始请求头没有域、路径或过期时间，因此种子只按论坛域名和根路径 `/` 建立；后续 `Set-Cookie` 使用服务器提供的属性。
+- 重启时优先恢复已保存的会话；环境中的 `BYR_COOKIE` 与初始化时相同不会覆盖刷新结果，移除该环境变量后也可恢复已有文件。显式设置 `BYR_COOKIE=""` 表示不使用认证，会返回 `AUTH_REQUIRED`，不会回退到文件；要通过已有会话恢复，应删除变量或 `.env` 中对应行，而非留空。
+- 显式配置不同的 `BYR_COOKIE` 时，通过种子摘要识别变更并重新初始化会话。会话过期或被删除时，不会用原来的环境 Cookie 自动恢复旧登录态。
+- 文件损坏或无法安全读写时返回 `SESSION_STORAGE_ERROR`，不覆盖损坏文件。更换文件或凭据前可先备份现有文件；服务不会自动登录或重试。
+
+已有有效密码 Cookie 时，同一用户正常轮换 `nforum[UTMPKEY]`、`nforum[UTMPNUM]`、`nforum[UTMPUSERID]` 无需响应同时提供 `nforum[PASSWORD]`。更新密码 Cookie 必须有当前作用域内有效的 `nforum[PASSWORD]`；响应切换用户还要求密码与三个会话字段完整、作用域一致，并清除旧用户在其他路径的登录字段。访客 Cookie 批次不会覆盖已有登录会话。
+
+Cookie 使用 `tough-cookie` 管理域名、路径和过期状态；收到的 `Max-Age` 优先于 `Expires`，并换算成固定到期时间，读取和重启都不会重新计时。只有符合当前请求作用域且未过期的 Cookie 才会发送；当前路径缺少完整登录字段时返回 `AUTH_REQUIRED`。
+
+一个会话文件只能由一个服务进程使用；目前没有跨进程文件锁。多个客户端分别启动服务时，应分别指定会话文件，避免互相覆盖。
 
 ### MCP 客户端
 
@@ -289,7 +310,10 @@ BYR_COOKIE="name=value; other=value"
     "forumcp": {
       "command": "npx",
       "args": ["-y", "fantastic-tribble"],
-      "env": {"BYR_COOKIE": "name=value; other=value"}
+      "env": {
+        "BYR_COOKIE": "name=value; other=value",
+        "BYR_COOKIE_FILE": "/absolute/path/to/forumcp/data/session-cookie.txt"
+      }
     }
   }
 }
@@ -303,19 +327,18 @@ BYR_COOKIE="name=value; other=value"
     "forumcp": {
       "command": "node",
       "args": ["/absolute/path/to/forumcp/dist/index.js"],
-      "env": {"BYR_COOKIE": "name=value; other=value"}
+      "env": {
+        "BYR_COOKIE": "name=value; other=value",
+        "BYR_COOKIE_FILE": "/absolute/path/to/forumcp/data/session-cookie.txt"
+      }
     }
   }
 }
 ```
 
-仅使用 RSS 时，以上两种客户端配置均可省略整个 `env` 字段。具体配置入口以所用客户端为准。认证工具在程序侧统一读取：
+仅使用 RSS 时，以上两种客户端配置均可省略整个 `env` 字段。已有会话文件后可省略 `BYR_COOKIE`，保留 `BYR_COOKIE_FILE` 指向原文件。具体配置入口以所用客户端为准。
 
-```ts
-process.env.BYR_COOKIE
-```
-
-本地 `npm start` 加载 `.env`，客户端通过 `env` 注入 Cookie；两者共用同一套认证代码。直接 Node.js 和 `npx` 启动都只读取进程环境变量，不自动加载 `.env`。客户端不需要、也不应该在每次工具调用时提交 Cookie。
+本地 `npm start` 加载 `.env`，客户端通过 `env` 提供初始 Cookie 和存储路径；两者共用同一套会话代码。直接 Node.js 和 `npx` 启动不自动加载 `.env`，但仍会按配置读取会话文件。客户端不需要、也不应该在每次工具调用时提交 Cookie。
 
 ## 项目结构
 
@@ -328,6 +351,7 @@ process.env.BYR_COOKIE
 │   ├── board-rss-params.ts # RSS 参数校验、地址及不支持版面检查
 │   ├── cookie-config.ts   # BYR_COOKIE 读取与安全校验
 │   ├── forum-http.ts      # 共享的受限 HTTP 请求、解码与页面分类
+│   ├── forum-session.ts   # 跨工具 Cookie 会话、刷新和原子持久化
 │   ├── inspect-article.ts # 帖子单页请求和结构化结果
 │   ├── parse-thread.ts    # 主题、楼主、热门和当前页楼层解析
 │   ├── raw-website.ts     # 原始文章页 HTML 读取
@@ -338,10 +362,11 @@ process.env.BYR_COOKIE
 │   ├── inspect-board-rss.ts # 不带凭据的单版面 RSS 请求
 │   ├── parse-board-directory.ts # 分区及版面目录 JSON 校验
 │   ├── inspect-board-directory.ts # 全站/指定分区目录及跨区去重
-│   ├── directory-session.ts # 仅目录调用内使用的临时会话刷新
+│   ├── directory-session.ts # 独立目录调用的内存会话适配
 │   ├── server.ts          # MCP 工具注册及可注入的服务工厂
 │   └── index.ts           # stdio MCP 入口
 ├── tests/                 # Node.js 内置测试运行器用例
+├── data/                  # 按需创建的本地会话存储，不提交 Git
 ├── .env.example           # 不含凭据的公开配置模板
 ├── package.json           # npm scripts 与开发依赖
 └── tsconfig.json          # TypeScript 编译配置
@@ -357,6 +382,7 @@ process.env.BYR_COOKIE
 | `src/board-rss-params.ts` | RSS 参数校验、固定地址构造及 `iwhisper` 排除 |
 | `src/cookie-config.ts` | `BYR_COOKIE` 读取与安全校验 |
 | `src/forum-http.ts` | 共享的 HTTP 请求、响应限制、解码与页面分类 |
+| `src/forum-session.ts` | 跨工具会话共享、Cookie 更新、过期与作用域处理、原子保存和重启恢复 |
 | `src/inspect-article.ts` | 帖子单页请求、分页检查和结构化结果 |
 | `src/parse-thread.ts` | 主题、楼主发言、热门回复及当前页楼层解析 |
 | `src/raw-website.ts` | 原始文章页 HTML 读取 |
@@ -367,7 +393,7 @@ process.env.BYR_COOKIE
 | `src/inspect-board-rss.ts` | 无需 Cookie 的单版面 RSS 请求及结构化结果 |
 | `src/parse-board-directory.ts` | 分区及版面目录 JSON 校验 |
 | `src/inspect-board-directory.ts` | 顺序读取目录、按分区筛选及跨区去重 |
-| `src/directory-session.ts` | 仅目录调用内使用的临时会话刷新，不持久化 Cookie |
+| `src/directory-session.ts` | 独立目录读取的内存会话适配；MCP 调用使用共享持久会话 |
 | `src/server.ts` | 五个 MCP 工具及可注入的服务工厂 |
 | `src/index.ts` | stdio MCP 入口 |
 | `.env.example` | 不含凭据的公开配置模板 |
@@ -378,9 +404,9 @@ process.env.BYR_COOKIE
 
 ### 凭据边界
 
-- 认证工具的 Cookie 只从 `BYR_COOKIE` 读取，不属于任何工具的参数；RSS 工具不读取环境凭据，也不发送 Cookie。
-- `.env` 已被 Git 忽略；`.env.example` 只能保留空值或假数据。
-- `.env` 是明文凭据文件，`chmod 600` 只能限制文件访问，不能提供加密保护。
+- 认证工具的初始 Cookie 来自 `BYR_COOKIE`，后续从共享会话恢复和刷新，不属于任何工具的参数；RSS 不读取环境凭据或会话文件，也不发送 Cookie。
+- `.env` 和默认存储目录 `data/` 已被 Git 忽略；`.env.example` 只能保留空值或假数据。自定义会话路径也不应提交到 Git。
+- `.env` 和会话文件都是明文凭据；`600` 权限只能限制文件访问，不能提供加密保护。
 - 与 MCP 同属一个系统用户且拥有 shell 权限的进程，仍可能读取该用户的环境变量或文件。
 
 ### 网络边界
@@ -389,7 +415,8 @@ process.env.BYR_COOKIE
 - 版面和文章 ID 必须通过运行时校验，不能注入协议、主机或额外路径。
 - 自动重定向被拒绝，Cookie 不会跟随跳转发送到其他地址。
 - 单次响应在解码前限制为 2 MiB，请求超时为 15 秒。
-- 不自动重试；目录查询仅在单次调用内更新三个会话 Cookie，其他工具不接收 `Set-Cookie`，所有工具都不持久化认证信息或原样返回底层异常、凭据。
+- 所有认证工具共享经过作用域和有效期检查的会话更新；切换用户和密码更新需有效密码 Cookie，访客更新不会覆盖已有登录会话。
+- 不自动登录或重试，不原样返回底层异常、会话文件内容或凭据。会话只保存到配置的本地文件，不写回环境变量或 `.env`。
 
 ### 内容边界
 
@@ -401,8 +428,9 @@ process.env.BYR_COOKIE
 
 | 错误 | 含义 |
 |---|---|
-| `AUTH_REQUIRED` | 认证工具未配置 Cookie，或服务器返回登录提示 |
+| `AUTH_REQUIRED` | 没有可用初始或已保存的 Cookie、会话已过期/删除，或服务器返回登录提示 |
 | `COOKIE_INVALID` | Cookie 格式、字符或长度不符合要求 |
+| `SESSION_STORAGE_ERROR` | 会话文件损坏或无法安全读取、保存；不覆盖损坏文件 |
 | `PAGE_OUT_OF_RANGE` | 版面或结构化帖子请求页码超过页面报告的总页数 |
 | `SECTION_NOT_FOUND` | 指定分区不在论坛返回的分区目录中 |
 | `RSS_UNAVAILABLE` | `iwhisper` 版面不支持 RSS，不区分大小写；请求前返回 |
@@ -434,11 +462,11 @@ npm pack --pack-destination /tmp
 npx -y --package /tmp/fantastic-tribble-0.1.0.tgz fantastic-tribble
 ```
 
-`npm pack` 会先清理并重新编译 `dist/`，然后生成本地安装包；它不会发布到 npm。第二条命令运行本地包，仅使用 RSS 时无需配置 Cookie，其他工具仍需通过环境变量配置。包版本变化后，应相应更新文件名。打包内容限定为 `dist/` 及 npm 自动包含的包元数据、README 等文件，不包含源码测试、开发依赖、`.env` 或 Cookie 文件。
+`npm pack` 会先清理并重新编译 `dist/`，然后生成本地安装包；它不会发布到 npm。第二条命令运行本地包，仅使用 RSS 时无需配置 Cookie，其他工具首次使用需环境 Cookie，也可恢复已保存会话。包版本变化后，应相应更新文件名。打包内容限定为 `dist/` 及 npm 自动包含的包元数据、README 等文件，不包含源码测试、开发依赖、`.env` 或 Cookie 文件。
 
 只有完成 npm 发布后，其他机器才能直接使用上面的包名启动命令。
 
-自动测试覆盖参数校验、认证配置、HTTP 传输、版面目录合并、RSS 粗列表、帖子结构解析、原始网页接口、MCP 工具注册和错误处理，使用假 Cookie、虚构帖子页面和临时 `.env`。RSS 用例验证无认证调用、不读取或发送 Cookie、排除 `iwhisper` 及错误结果。帖子用例包括正文与热门回复分离、楼层编号、匿名作者缺失、分页和未知结构拒绝。MCP 测试通过内存传输验证工具发现、结构化帖子调用、目录调用和错误返回；涉及 HTTP 传输的集成测试仅访问本机回环服务。测试不读取项目中的真实 `.env`，也不访问北邮人论坛。
+自动测试覆盖参数校验、认证配置、HTTP 传输、会话刷新与恢复、版面目录合并、RSS 粗列表、帖子结构解析、原始网页接口、MCP 工具注册和错误处理，使用假 Cookie、虚构帖子页面及临时凭据文件。RSS 用例验证无认证调用、不读取或发送 Cookie、不触碰损坏的会话文件、排除 `iwhisper` 及错误结果。帖子用例包括正文与热门回复分离、楼层编号、匿名作者缺失、分页和未知结构拒绝。MCP 测试通过内存传输验证工具发现、跨工具会话共享、结构化帖子调用、目录调用和错误返回；涉及 HTTP 传输的集成测试仅访问本机回环服务。测试不读取项目中的真实 `.env` 或会话文件，也不访问北邮人论坛。
 
 ## 路线图
 

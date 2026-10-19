@@ -1,4 +1,5 @@
 import { createDirectorySession } from "./directory-session.js";
+import type { ForumPageReader } from "./forum-session.js";
 import {
   isSectionId, parseDirectoryBoards, parseSections,
   type DirectoryBoard, type ForumSection,
@@ -21,13 +22,14 @@ export async function inspectBoardDirectory(
   input: BoardDirectoryInput = {},
   request: typeof fetch = fetch,
   env: NodeJS.ProcessEnv = process.env,
+  readPage?: ForumPageReader,
 ): Promise<BoardDirectoryInspection> {
   if (typeof input !== "object" || input === null || Array.isArray(input) ||
     (input.section !== undefined && !isSectionId(input.section))) {
     throw new Error("section 必须是目录返回的分区编号字符串");
   }
   const section = input.section ?? null;
-  const readDirectory = createDirectorySession(request, env);
+  const readDirectory = readPage ?? createDirectorySession(request, env);
   const response = await readDirectory(`${DIRECTORY_URL}?root=list-section&bo=1`);
   const base: BoardDirectoryInspection = {
     section, sections: [], boards: [], total_boards: null,

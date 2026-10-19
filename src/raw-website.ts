@@ -1,5 +1,6 @@
 import { buildArticleUrl } from "./article-url.js";
 import { fetchForumHtml } from "./forum-http.js";
+import type { ForumPageReader } from "./forum-session.js";
 import { validateThreadParams, type ThreadInput } from "./thread-params.js";
 
 export type RawWebsiteInspection = {
@@ -18,10 +19,11 @@ export async function inspectRawWebsite(
   input: ThreadInput,
   request: typeof fetch = fetch,
   env: NodeJS.ProcessEnv = process.env,
+  readPage?: ForumPageReader,
 ): Promise<RawWebsiteInspection> {
   const params = validateThreadParams(input);
   const article_url = buildArticleUrl(params.board, params.article_id, params.page);
-  const response = await fetchForumHtml(article_url, request, env);
+  const response = await (readPage ? readPage(article_url) : fetchForumHtml(article_url, request, env));
   return {
     ...params,
     article_url,

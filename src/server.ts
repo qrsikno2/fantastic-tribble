@@ -6,6 +6,7 @@ import { inspectBoardDirectory } from "./inspect-board-directory.js";
 import { inspectBoardRss } from "./inspect-board-rss.js";
 import { inspectRawWebsite } from "./raw-website.js";
 import { isSectionId } from "./parse-board-directory.js";
+import { createForumSession, type ForumSessionOptions } from "./forum-session.js";
 
 const boardSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/).refine((value) => !/\s/.test(value));
 const pageSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional();
@@ -23,6 +24,7 @@ const publicErrors = new Set([
   "DECODE_ERROR",
   "REQUEST_FAILED",
   "RSS_UNAVAILABLE",
+  "SESSION_STORAGE_ERROR",
 ]);
 
 function toolError(error: unknown) {
@@ -38,7 +40,9 @@ function toolError(error: unknown) {
 export function createServer(
   request: typeof fetch = fetch,
   env: NodeJS.ProcessEnv = process.env,
+  options: ForumSessionOptions = {},
 ): McpServer {
+  const readPage = createForumSession(request, env, options);
   const server = new McpServer({
     name: "fantastic-tribble",
     version: "0.1.0",
@@ -55,7 +59,7 @@ export function createServer(
     },
     async (input) => {
       try {
-        const inspection = await inspectBoardDirectory(input, request, env);
+        const inspection = await inspectBoardDirectory(input, request, env, readPage);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
           ...(inspection.result === "OK" ? {} : { isError: true }),
@@ -75,7 +79,7 @@ export function createServer(
     },
     async (input) => {
       try {
-        const inspection = await inspectArticle(input, request, env);
+        const inspection = await inspectArticle(input, request, env, readPage);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
           ...(inspection.result === "OK" ? {} : { isError: true }),
@@ -95,7 +99,7 @@ export function createServer(
     },
     async (input) => {
       try {
-        const inspection = await inspectRawWebsite(input, request, env);
+        const inspection = await inspectRawWebsite(input, request, env, readPage);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
           ...(inspection.result === "OK" ? {} : { isError: true }),
@@ -135,7 +139,7 @@ export function createServer(
     },
     async (input) => {
       try {
-        const inspection = await inspectBoard(input, request, env);
+        const inspection = await inspectBoard(input, request, env, readPage);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
           ...(inspection.result === "OK" ? {} : { isError: true }),
