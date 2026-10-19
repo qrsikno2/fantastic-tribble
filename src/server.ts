@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 import { inspectArticle } from "./inspect-article.js";
 import { inspectBoard } from "./inspect-board.js";
 import { inspectBoardDirectory } from "./inspect-board-directory.js";
+import { inspectBoardRss } from "./inspect-board-rss.js";
 import { inspectRawWebsite } from "./raw-website.js";
 import { isSectionId } from "./parse-board-directory.js";
 
@@ -21,6 +22,7 @@ const publicErrors = new Set([
   "RESPONSE_TOO_LARGE",
   "DECODE_ERROR",
   "REQUEST_FAILED",
+  "RSS_UNAVAILABLE",
 ]);
 
 function toolError(error: unknown) {
@@ -94,6 +96,26 @@ export function createServer(
     async (input) => {
       try {
         const inspection = await inspectRawWebsite(input, request, env);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
+          ...(inspection.result === "OK" ? {} : { isError: true }),
+        };
+      } catch (error) {
+        return toolError(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_board_rss",
+    {
+      description: "通过单个版面的公开 RSS 获取帖子粗列表，无需账号、密码或 BYR_COOKIE，且不发送 Cookie。仅返回订阅中的标题、链接、作者和发布时间；无分页或总页数。iwhisper 版面不支持此接口（不区分大小写）",
+      inputSchema: { board: boardSchema },
+      annotations: { readOnlyHint: true, openWorldHint: true },
+    },
+    async (input) => {
+      try {
+        const inspection = await inspectBoardRss(input, request);
         return {
           content: [{ type: "text" as const, text: JSON.stringify(inspection) }],
           ...(inspection.result === "OK" ? {} : { isError: true }),

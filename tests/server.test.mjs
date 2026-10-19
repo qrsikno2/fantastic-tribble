@@ -74,9 +74,14 @@ function jsonResponse(data) {
 test("tools/list exposes board tools and separate structured/raw article tools", async (t) => {
   const client = await connect(t);
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map(({ name }) => name).sort(), ["get_board_threads", "get_raw_website", "get_thread", "list_boards"]);
+  assert.deepEqual(tools.map(({ name }) => name).sort(), ["get_board_rss", "get_board_threads", "get_raw_website", "get_thread", "list_boards"]);
   const directory = tools.find(({ name }) => name === "list_boards");
   const threads = tools.find(({ name }) => name === "get_board_threads");
+  const rss = tools.find(({ name }) => name === "get_board_rss");
+  assert.deepEqual(rss.inputSchema.required, ["board"]);
+  assert.deepEqual(Object.keys(rss.inputSchema.properties), ["board"]);
+  assert.equal(rss.annotations.readOnlyHint, true);
+  assert.equal(rss.annotations.openWorldHint, true);
   assert.deepEqual(directory.inputSchema.required ?? [], []);
   assert.deepEqual(Object.keys(directory.inputSchema.properties), ["section"]);
   assert.equal(directory.inputSchema.properties.section.type, "string");
@@ -96,6 +101,83 @@ test("tools/list exposes board tools and separate structured/raw article tools",
     assert.equal(article.inputSchema.properties.page.maximum, Number.MAX_SAFE_INTEGER);
     assert.equal(article.annotations.readOnlyHint, true);
     assert.equal(article.annotations.openWorldHint, true);
+  }
+});
+
+test("get_board_rss reads a public feed without accessing credentials or sending authentication", async (t) => {
+  const rss = `<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel>
+      <title>Health - 健康生活</title><link>https://bbs.byr.cn/board/Health</link>
+      <description>Health board feed</description>
+      <lastBuildDate>Mon, 19 Oct 2026 10:00:00 +0800</lastBuildDate>
+      <item><title>健康 &amp; 运动</title><link>https://bbs.byr.cn/article/Health/123</link>
+        <author>DemoUser</author><pubDate>Mon, 19 Oct 2026 09:00:00 +0800</pubDate>
+        <description>正文摘要不在粗列表返回</description>
+      </item>
+    </channel></rss>`;
+  for (const env of [{}, fakeEnv, Object.defineProperty({}, "BYR_COOKIE", {
+    get() { throw new Error("RSS must not read BYR_COOKIE"); },
+  })]) {
+    let calls = 0;
+    const client = await connect(t, async (url, init) => {
+      calls += 1;
+      assert.equal(url, "https://bbs.byr.cn/rss/board-Health");
+      const headers = new Headers(init?.headers);
+      assert.equal(headers.has("cookie"), false);
+      assert.equal(headers.has("authorization"), false);
+      assert.equal(init?.credentials, "omit");
+      return new Response(rss, { headers: { "content-type": "text/xml; charset=utf-8" } });
+    }, env);
+    const result = await client.callTool({ name: "get_board_rss", arguments: { board: "Health" } });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(payload(result), {
+      board: "Health", board_url: "https://bbs.byr.cn/board/Health",
+      rss_url: "https://bbs.byr.cn/rss/board-Health",
+      http_status: 200, content_type: "text/xml; charset=utf-8", result: "OK",
+      feed_title: "Health - 健康生活", last_build_date: "Mon, 19 Oct 2026 10:00:00 +0800",
+      threads: [{
+        article_id: "123", title: "健康 & 运动", article_url: "https://bbs.byr.cn/article/Health/123",
+        author: "DemoUser", published_at: "Mon, 19 Oct 2026 09:00:00 +0800",
+      }],
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test("get_board_rss rejects unsupported and malformed boards without HTTP requests", async (t) => {
+  let calls = 0;
+  const client = await connect(t, async () => {
+    calls += 1;
+    return htmlResponse("");
+  }, {});
+  for (const board of ["iwhisper", "IWhisper", "IwHiSpEr"]) {
+    const result = await client.callTool({ name: "get_board_rss", arguments: { board } });
+    assert.equal(result.isError, true);
+    assert.deepEqual(payload(result), { result: "RSS_UNAVAILABLE" });
+  }
+  for (const args of [{}, { board: "../Health" }, { board: "https://example.com" }, { board: "Health\n" }]) {
+    const result = await client.callTool({ name: "get_board_rss", arguments: args });
+    assert.equal(result.isError, true, JSON.stringify(args));
+  }
+  assert.equal(calls, 0);
+});
+
+test("get_board_rss reports HTTP, authentication and malformed feed errors without exposing response bodies", async (t) => {
+  for (const [body, status, expected] of [
+    ["private server failure", 503, "HTTP_ERROR"],
+    ["<p>您未登录,请登录后继续操作</p>", 200, "AUTH_REQUIRED"],
+    ["<html><body>private unknown page</body></html>", 200, "UNPARSED_PAGE"],
+  ]) {
+    const client = await connect(t, async () => htmlResponse(body, status), {});
+    const result = await client.callTool({ name: "get_board_rss", arguments: { board: "Health" } });
+    assert.equal(result.isError, true);
+    assert.deepEqual(payload(result), {
+      board: "Health", board_url: "https://bbs.byr.cn/board/Health",
+      rss_url: "https://bbs.byr.cn/rss/board-Health", http_status: status,
+      content_type: "text/html; charset=utf-8", result: expected,
+      feed_title: null, last_build_date: null, threads: [],
+    });
+    assert.equal(JSON.stringify(result).includes(body), false);
   }
 });
 
@@ -254,7 +336,7 @@ test("malformed directory JSON is an MCP error with no partial data or response-
 
 test("network failures do not expose exception details or Cookie values", async (t) => {
   const client = await connect(t, async () => { throw new Error(`private request: ${fakeEnv.BYR_COOKIE}`); });
-  for (const name of ["get_board_threads", "list_boards", "get_thread", "get_raw_website"]) {
+  for (const name of ["get_board_rss", "get_board_threads", "list_boards", "get_thread", "get_raw_website"]) {
     const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "100001" } });
     assert.equal(result.isError, true);
     assert.deepEqual(payload(result), { result: "REQUEST_FAILED" });
@@ -270,7 +352,7 @@ test("forum rate limiting is a controlled MCP error, not an encoding failure", a
     async () => htmlResponse("too many requests", 429),
   ]) {
     const client = await connect(t, request);
-    for (const name of ["get_board_threads", "list_boards", "get_thread", "get_raw_website"]) {
+    for (const name of ["get_board_rss", "get_board_threads", "list_boards", "get_thread", "get_raw_website"]) {
       const result = await client.callTool({ name, arguments: name === "list_boards" ? {} : { board: "Talking", article_id: "100001", page: 2 } });
       assert.equal(result.isError, true);
       assert.deepEqual(payload(result), { result: "RATE_LIMITED" });

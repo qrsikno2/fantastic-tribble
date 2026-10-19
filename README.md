@@ -2,16 +2,16 @@
 
 面向北邮人论坛的轻量级只读 MCP 服务。
 
-`fantastic-tribble` 通过 stdio MCP 提供北邮人论坛版面目录、版面查询和结构化帖子读取。调用方可先列出版面，再提交版面英文名及页码，服务负责认证、请求、解码、解析和错误归一化。项目针对低资源服务器设计，采用按需请求和无状态运行方式；帖子列表和帖子正文每次只读取一页。需要原始 HTML 时单独调用 `get_raw_website`。
+`fantastic-tribble` 通过 stdio MCP 提供北邮人论坛版面目录、版面查询和结构化帖子读取。`get_board_rss` 可直接通过公开 RSS 获取单个版面的帖子粗列表，无需账号、密码或 Cookie（不支持 `iwhisper`）。目录、分页列表和帖子正文使用 Cookie 认证；调用方只需提交查询参数。项目针对低资源服务器设计，采用按需请求和无状态运行方式；分页列表和帖子正文每次只读取一页。需要原始 HTML 时单独调用 `get_raw_website`。
 
 > [!IMPORTANT]
-> 项目目前处于早期开发阶段。已提供版面目录、版面页数查询、指定页帖子列表和结构化帖子读取。`get_thread` 返回主题、楼主发言、热门回复和当前页各楼回复；原始 HTML 由 `get_raw_website` 提供。更多帖子样式和客户端兼容性尚待验证。
+> 项目目前处于早期开发阶段。已提供无需认证的 RSS 粗列表、版面目录、版面页数查询、指定页帖子列表和结构化帖子读取。`get_thread` 返回主题、楼主发言、热门回复和当前页各楼回复；原始 HTML 由 `get_raw_website` 提供。更多帖子样式和客户端兼容性尚待验证。
 
 ## 设计目标
 
 - **固定数据源**：仅访问 `https://bbs.byr.cn`，调用方不能指定任意主机或请求路径。
-- **工具接口**：`list_boards(section?)`、`get_board_threads(board, page = 1)`、`get_thread(board, article_id, page = 1)` 和 `get_raw_website(board, article_id, page = 1)`。
-- **凭据与内容分离**：MCP 客户端只传查询参数，Cookie 由服务进程环境提供。
+- **工具接口**：`list_boards(section?)`、`get_board_rss(board)`、`get_board_threads(board, page = 1)`、`get_thread(board, article_id, page = 1)` 和 `get_raw_website(board, article_id, page = 1)`。
+- **凭据与内容分离**：MCP 客户端只传查询参数；RSS 请求不读取或发送 Cookie，其他工具的 Cookie 由服务进程环境提供。
 - **低资源占用**：不常驻浏览器，不依赖数据库、Redis 或向量索引。
 - **保守解析**：结构化接口在 HTTP 200 后继续检查页面语义；原始网页接口的成功仅表示获取成功。
 - **可测试性**：网络函数和环境变量均可注入，自动测试不依赖真实论坛账号。
@@ -23,7 +23,7 @@
 │ MCP client  │ ──────────────────▶ │ fantastic-tribble │
 └─────────────┘                     └────────┬──────────┘
                                             │
-                                   参数校验 │ 认证配置
+                                   参数校验 │ 按工具认证
                                             │
                                    固定站点 HTTP GET
                                             │
@@ -31,7 +31,7 @@
                                  https://bbs.byr.cn
 ```
 
-版面查询数据流：
+分页版面查询数据流：
 
 ```text
       board + page
@@ -58,18 +58,19 @@
 |---|---|---|
 | TypeScript 工具链 | 已完成 | 支持严格类型检查、编译和 Node.js 测试 |
 | 参数校验 | 已完成 | 校验英文版面名、文章 ID 和安全正整数页码 |
-| 固定站点地址 | 已完成 | 仅生成北邮人论坛版面和文章路径 |
+| 固定站点地址 | 已完成 | 仅生成北邮人论坛目录、RSS、版面和文章路径 |
 | HTTP 请求 | 已完成 | 15 秒超时、2 MiB 响应上限、拒绝自动跳转 |
-| Cookie 配置 | 已完成 | 统一读取 `process.env.BYR_COOKIE` |
+| Cookie 配置 | 已完成 | 认证工具统一读取 `process.env.BYR_COOKIE`，RSS 工具不读取 |
 | 中文解码 | 已完成 | 根据响应声明处理 GBK、UTF-8 等编码 |
 | 登录状态检查 | 已完成 | 识别未登录提示和论坛限流响应 |
 | 版面目录 | 已完成 | 列出全部或指定分区的版面英文名、中文名和链接，不读取帖子 |
+| RSS 帖子粗列表 | 已完成 | 无需账号、密码或 Cookie，单次读取一个版面的公开订阅；不支持 `iwhisper` |
 | 版面页数查询 | 已完成 | 从当前账号所见分页栏读取 `total_pages`，不遍历所有页 |
 | 版面帖子列表 | 已完成 | 按 `page` 读取帖子标题、链接及页面提供的元数据 |
 | 正文与回复解析 | 已完成 | `get_thread` 返回主题、楼主、页面精选热门回复及当前页楼层 |
 | 帖子内部翻页 | 已完成 | 两个帖子接口均接受安全正整数 `page`，每次只读取一页 |
 | 原始网页读取 | 已完成 | `get_raw_website` 单独返回解码后的原始 HTML |
-| MCP 工具注册 | 已完成 | 通过 stdio 提供四个只读工具 |
+| MCP 工具注册 | 已完成 | 通过 stdio 提供五个只读工具 |
 | MCP 客户端集成 | 待验证 | 使用下方 stdio 配置，具体客户端兼容性仍需验证 |
 
 ## 快速开始
@@ -112,11 +113,33 @@ npm start
 npx -y fantastic-tribble
 ```
 
-`npx` 会下载包及运行依赖，并启动已经编译好的服务；首次使用需要访问 npm。此命令启动的是 stdio MCP 服务，等待输入时没有界面或启动提示。读论坛仍需通过进程环境变量配置 `BYR_COOKIE`，详见下方客户端示例。`npx` 启动时不会自动读取当前目录的 `.env`。
+`npx` 会下载包及运行依赖，并启动已经编译好的服务；首次使用需要访问 npm。此命令启动的是 stdio MCP 服务，等待输入时没有界面或启动提示。仅使用 `get_board_rss` 时无需配置环境变量；其他工具需通过进程环境变量配置 `BYR_COOKIE`，详见下方客户端示例。`npx` 启动时不会自动读取当前目录的 `.env`。
 
 ## 版面查询工具
 
-这里的“分组”对应论坛版面，`board` 填英文版面名，例如 `Talking`。版面名不区分大小写，例如 `iwhisper` 和 `IWhisper` 均可使用；服务校验页面链接时兼容论坛返回的规范大小写。页码从 1 开始；读取帖子列表时每次只请求一页，不批量抓取整个版面。
+这里的“分组”对应论坛版面，`board` 填英文版面名，例如 `Talking`。服务校验页面链接时兼容论坛返回的规范大小写。分页接口的页码从 1 开始，每次只请求一页；RSS 接口每次只读取一个版面的订阅，不接受页码。
+
+### 无需账号读取 RSS 粗列表
+
+工具名：`get_board_rss`
+
+```json
+{"board":"Health"}
+```
+
+请求地址为 `https://bbs.byr.cn/rss/board-Health`，其他版面使用 `/rss/board-<英文版面名>`。此工具无需账号、密码或 `BYR_COOKIE`，即使进程已配置 Cookie，也不会读取或发送它。`iwhisper` 不支持 RSS，任意大小写写法（如 `IWhisper`）均在请求前返回 `RSS_UNAVAILABLE`；可使用带认证的 `get_board_threads` 查询该版面。
+
+成功结果包含 `board`、`board_url`、`rss_url`、`http_status`、`content_type`、`result: "OK"`、`feed_title`、`last_build_date` 和 `threads`：
+
+| 字段 | 含义 |
+|---|---|
+| `feed_title` | 订阅标题；无法确认有效订阅时返回错误 |
+| `last_build_date` | RSS 提供的更新时间原文，缺失时为 `null` |
+| `threads[].article_id`、`article_url` | 帖子 ID 和固定站点链接 |
+| `threads[].title` | 帖子标题 |
+| `threads[].author`、`published_at` | RSS 提供的作者和发布时间原文，缺失时为 `null` |
+
+RSS 仅返回订阅中的粗列表，可能经过论坛缓存，也不保证覆盖版面的全部帖子。不提供正文、回复数、置顶状态、分页或总页数；服务不会逐帖请求内容。使用返回的 ID 调用 `get_thread` 读取正文时仍需 Cookie。RSS 请求或解析失败会返回 MCP `isError: true`，不能把错误结果中的空列表当成空版面。
 
 ### 列出有哪些版面
 
@@ -230,6 +253,8 @@ npx -y fantastic-tribble
 
 ## 认证配置
 
+`get_board_rss` 无需认证：仅使用 RSS 时可跳过本节的 Cookie 配置，也无需创建 `.env`。`list_boards`、`get_board_threads`、`get_thread` 和 `get_raw_website` 仍需配置 `BYR_COOKIE`；服务不接受账号或密码参数。
+
 ### 本地开发
 
 复制公开模板：
@@ -284,7 +309,7 @@ BYR_COOKIE="name=value; other=value"
 }
 ```
 
-具体配置入口以所用客户端为准。程序侧统一读取：
+仅使用 RSS 时，以上两种客户端配置均可省略整个 `env` 字段。具体配置入口以所用客户端为准。认证工具在程序侧统一读取：
 
 ```ts
 process.env.BYR_COOKIE
@@ -300,6 +325,7 @@ process.env.BYR_COOKIE
 │   ├── thread-params.ts   # 三参数类型与运行时校验
 │   ├── article-url.ts     # 固定论坛文章地址构造
 │   ├── board-params.ts    # 版面参数校验和分页地址构造
+│   ├── board-rss-params.ts # RSS 参数校验、地址及不支持版面检查
 │   ├── cookie-config.ts   # BYR_COOKIE 读取与安全校验
 │   ├── forum-http.ts      # 共享的受限 HTTP 请求、解码与页面分类
 │   ├── inspect-article.ts # 帖子单页请求和结构化结果
@@ -308,6 +334,8 @@ process.env.BYR_COOKIE
 │   ├── parse-pagination.ts # 版面与帖子共用的分页验证
 │   ├── parse-board.ts     # 版面分页与帖子列表 HTML 解析
 │   ├── inspect-board.ts   # 版面单页请求、分页和帖子列表
+│   ├── parse-board-rss.ts # RSS 订阅和帖子粗列表解析
+│   ├── inspect-board-rss.ts # 不带凭据的单版面 RSS 请求
 │   ├── parse-board-directory.ts # 分区及版面目录 JSON 校验
 │   ├── inspect-board-directory.ts # 全站/指定分区目录及跨区去重
 │   ├── directory-session.ts # 仅目录调用内使用的临时会话刷新
@@ -326,6 +354,7 @@ process.env.BYR_COOKIE
 | `src/thread-params.ts` | 三参数类型与运行时校验 |
 | `src/article-url.ts` | 固定论坛文章地址构造 |
 | `src/board-params.ts` | 版面参数校验及 `?p=` 分页地址构造 |
+| `src/board-rss-params.ts` | RSS 参数校验、固定地址构造及 `iwhisper` 排除 |
 | `src/cookie-config.ts` | `BYR_COOKIE` 读取与安全校验 |
 | `src/forum-http.ts` | 共享的 HTTP 请求、响应限制、解码与页面分类 |
 | `src/inspect-article.ts` | 帖子单页请求、分页检查和结构化结果 |
@@ -334,10 +363,12 @@ process.env.BYR_COOKIE
 | `src/parse-pagination.ts` | 版面与帖子共用的分页验证 |
 | `src/parse-board.ts` | 版面分页和帖子列表解析 |
 | `src/inspect-board.ts` | 版面单页请求及结构化结果 |
+| `src/parse-board-rss.ts` | RSS 订阅元数据和帖子粗列表解析 |
+| `src/inspect-board-rss.ts` | 无需 Cookie 的单版面 RSS 请求及结构化结果 |
 | `src/parse-board-directory.ts` | 分区及版面目录 JSON 校验 |
 | `src/inspect-board-directory.ts` | 顺序读取目录、按分区筛选及跨区去重 |
 | `src/directory-session.ts` | 仅目录调用内使用的临时会话刷新，不持久化 Cookie |
-| `src/server.ts` | 四个 MCP 工具及可注入的服务工厂 |
+| `src/server.ts` | 五个 MCP 工具及可注入的服务工厂 |
 | `src/index.ts` | stdio MCP 入口 |
 | `.env.example` | 不含凭据的公开配置模板 |
 
@@ -347,7 +378,7 @@ process.env.BYR_COOKIE
 
 ### 凭据边界
 
-- Cookie 只从 `BYR_COOKIE` 读取，不属于任何工具的参数。
+- 认证工具的 Cookie 只从 `BYR_COOKIE` 读取，不属于任何工具的参数；RSS 工具不读取环境凭据，也不发送 Cookie。
 - `.env` 已被 Git 忽略；`.env.example` 只能保留空值或假数据。
 - `.env` 是明文凭据文件，`chmod 600` 只能限制文件访问，不能提供加密保护。
 - 与 MCP 同属一个系统用户且拥有 shell 权限的进程，仍可能读取该用户的环境变量或文件。
@@ -370,17 +401,18 @@ process.env.BYR_COOKIE
 
 | 错误 | 含义 |
 |---|---|
-| `AUTH_REQUIRED` | 未配置 Cookie，或服务器仍返回登录提示 |
+| `AUTH_REQUIRED` | 认证工具未配置 Cookie，或服务器返回登录提示 |
 | `COOKIE_INVALID` | Cookie 格式、字符或长度不符合要求 |
 | `PAGE_OUT_OF_RANGE` | 版面或结构化帖子请求页码超过页面报告的总页数 |
 | `SECTION_NOT_FOUND` | 指定分区不在论坛返回的分区目录中 |
+| `RSS_UNAVAILABLE` | `iwhisper` 版面不支持 RSS，不区分大小写；请求前返回 |
 | `HTTP_ERROR` | 服务器返回非 2xx HTTP 状态 |
 | `REQUEST_TIMEOUT` | 请求或响应读取超过 15 秒 |
 | `RATE_LIMITED` | 论坛返回 HTTP 429 或已确认的“请勿频繁登录”提示，需稍后重试 |
 | `RESPONSE_TOO_LARGE` | 响应正文超过 2 MiB |
 | `DECODE_ERROR` | 响应字符编码无法可靠解码 |
 | `REQUEST_FAILED` | 网络、流读取或重定向等未分类失败 |
-| `UNPARSED_PAGE` | 版面目录、帖子/版面页面结构或页码无法确认 |
+| `UNPARSED_PAGE` | 版面目录、RSS、帖子/版面页面结构或页码无法确认 |
 
 Cookie 语法通过校验并不等于登录态有效；只有真实授权请求成功并完成页面解析后，才能确认读帖链路可用。
 
@@ -402,11 +434,11 @@ npm pack --pack-destination /tmp
 npx -y --package /tmp/fantastic-tribble-0.1.0.tgz fantastic-tribble
 ```
 
-`npm pack` 会先清理并重新编译 `dist/`，然后生成本地安装包；它不会发布到 npm。第二条命令运行本地包，仍需通过环境变量配置 Cookie。包版本变化后，应相应更新文件名。打包内容限定为 `dist/` 及 npm 自动包含的包元数据、README 等文件，不包含源码测试、开发依赖、`.env` 或 Cookie 文件。
+`npm pack` 会先清理并重新编译 `dist/`，然后生成本地安装包；它不会发布到 npm。第二条命令运行本地包，仅使用 RSS 时无需配置 Cookie，其他工具仍需通过环境变量配置。包版本变化后，应相应更新文件名。打包内容限定为 `dist/` 及 npm 自动包含的包元数据、README 等文件，不包含源码测试、开发依赖、`.env` 或 Cookie 文件。
 
 只有完成 npm 发布后，其他机器才能直接使用上面的包名启动命令。
 
-自动测试覆盖参数校验、认证配置、HTTP 传输、版面目录合并、帖子结构解析、原始网页接口、MCP 工具注册和错误处理，使用假 Cookie、虚构帖子页面和临时 `.env`。帖子用例包括正文与热门回复分离、楼层编号、匿名作者缺失、分页和未知结构拒绝。MCP 测试通过内存传输验证工具发现、结构化帖子调用、目录调用和错误返回；涉及 HTTP 传输的集成测试仅访问本机回环服务。测试不读取项目中的真实 `.env`，也不访问北邮人论坛。
+自动测试覆盖参数校验、认证配置、HTTP 传输、版面目录合并、RSS 粗列表、帖子结构解析、原始网页接口、MCP 工具注册和错误处理，使用假 Cookie、虚构帖子页面和临时 `.env`。RSS 用例验证无认证调用、不读取或发送 Cookie、排除 `iwhisper` 及错误结果。帖子用例包括正文与热门回复分离、楼层编号、匿名作者缺失、分页和未知结构拒绝。MCP 测试通过内存传输验证工具发现、结构化帖子调用、目录调用和错误返回；涉及 HTTP 传输的集成测试仅访问本机回环服务。测试不读取项目中的真实 `.env`，也不访问北邮人论坛。
 
 ## 路线图
 

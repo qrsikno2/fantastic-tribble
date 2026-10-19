@@ -47,12 +47,11 @@ export function isForumLoginRequired(html: string): boolean {
 }
 
 // 分块读取，避免先把一个无限大的响应全部放进内存。
-async function readHtml(response: Response): Promise<string> {
+async function readContent(response: Response, xml: boolean): Promise<string> {
   if (response.body === null) return "";
 
   const contentType = response.headers.get("content-type") ?? "";
   const charset = /charset\s*=\s*["']?([^;\s"']+)/i.exec(contentType);
-  const encoding = charset === null ? "gbk" : charset[1];
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -84,6 +83,14 @@ async function readHtml(response: Response): Promise<string> {
     bytes.every((byte, index) => byte === LOGIN_RATE_LIMIT_GBK[index])) {
     throw new Error("RATE_LIMITED");
   }
+  // RSS 未声明 HTTP charset 时遵循 XML 声明；HTML 保留站点的 GBK 默认值。
+  const xmlEncoding = !xml ? undefined
+    : bytes[0] === 0xff && bytes[1] === 0xfe ? "utf-16le"
+    : bytes[0] === 0xfe && bytes[1] === 0xff ? "utf-16be"
+    : /^(?:\u00ef\u00bb\u00bf)?<\?xml\s[^?]*\bencoding\s*=\s*["']([^"']+)["']/i.exec(
+      Buffer.from(bytes.subarray(0, 512)).toString("latin1"),
+    )?.[1];
+  const encoding = charset?.[1] ?? (xml ? xmlEncoding ?? "utf-8" : "gbk");
   let html: string;
   try {
     html = new TextDecoder(encoding, { fatal: true }).decode(bytes);
@@ -102,16 +109,40 @@ export async function fetchForumHtml(
 ): Promise<ForumHtmlResponse> {
   validateForumUrl(url);
   const cookie = readCookie(env);
+  return fetchForumContent(url, request, {
+    "X-Requested-With": "XMLHttpRequest",
+    Accept: "text/html",
+    Cookie: cookie,
+  }, false);
+}
+
+// 公开 RSS 单独构造请求头，不读取环境变量，也不接收或重用会话 Cookie。
+export async function fetchForumRss(
+  url: string,
+  request: typeof fetch = fetch,
+): Promise<ForumHtmlResponse> {
+  validateForumUrl(url);
+  const target = new URL(url);
+  if (!/^\/rss\/board-[A-Za-z][A-Za-z0-9_-]*$/.test(target.pathname) || target.search || target.hash) {
+    throw new Error("URL_INVALID");
+  }
+  return fetchForumContent(url, request, {
+    Accept: "application/rss+xml, application/xml, text/xml",
+  }, true);
+}
+
+async function fetchForumContent(
+  url: string,
+  request: typeof fetch,
+  headers: Record<string, string>,
+  xml: boolean,
+): Promise<ForumHtmlResponse> {
   const signal = AbortSignal.timeout(15_000);
 
   try {
     const response = await request(url, {
       method: "GET",
-      headers: {
-        "X-Requested-With": "XMLHttpRequest",
-        Accept: "text/html",
-        Cookie: cookie,
-      },
+      headers,
       credentials: "omit",
       redirect: "error",
       signal,
@@ -129,7 +160,7 @@ export async function fetchForumHtml(
       };
     }
 
-    const html = await readHtml(response);
+    const html = await readContent(response, xml);
     return {
       http_status: response.status,
       content_type: contentType,
